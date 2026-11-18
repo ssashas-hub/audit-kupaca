@@ -6,5 +6,9 @@ window.APP_CONFIG = {
   spHost: 'ekolineks.sharepoint.com',
   sitePath: '/sites/Komercijala',
   listName: 'Lične karte kupaca',
-  photoFolder: 'Fotografije kupaca'
+  photoFolder: 'Fotografije kupaca',
+  logList: 'Dnevnik rada',
+  visitRadius: 200,   // metara: koliko daleko od objekta sme da se započne poseta
+  maxAccuracy: 150    // metara: lošija GPS tačnost se ne prihvata
+
 };
