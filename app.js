@@ -49,7 +49,7 @@ const S = {
   cur: null, step: 0, d: null, photos: [], online: navigator.onLine, pending: 0, syncing: false,
   logList: null, day: null, visit: null, busy: false
 };
-const RADIUS = C.visitRadius || 200, MAXACC = C.maxAccuracy || 150;
+const RADIUS = C.visitRadius || 50, MAXACC = C.maxAccuracy || 100, MAPACC = C.mapAccuracy || 10, MAPWAIT = 45000;
 const LS_DAY = 'ak_day_v1', LS_VISIT = 'ak_visit_v1';
 try { S.day = JSON.parse(localStorage.getItem(LS_DAY) || 'null'); S.visit = JSON.parse(localStorage.getItem(LS_VISIT) || 'null'); } catch (e) { }
 const saveDay = () => { try { localStorage.setItem(LS_DAY, JSON.stringify(S.day)); localStorage.setItem(LS_VISIT, JSON.stringify(S.visit)); } catch (e) { } };
@@ -68,7 +68,38 @@ function getPos() {
       { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
   });
 }
-const parseLoc = s => { const m = String(s || '').match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/); return m ? { lat: +m[1], lon: +m[2] } : null; };
+const parseLoc = s => { const m = String(s || '').match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)(?:\s*\(±(\d+))?/); return m ? { lat: +m[1], lon: +m[2], acc: m[3] ? +m[3] : MAPACC } : null; };
+// precizno mapiranje objekta: prati GPS dok preciznost ne padne na MAPACC ili istekne vreme
+function getPrecise(onTick) {
+  if (DEMO) return new Promise(res => { let a = 24; const t = setInterval(() => { a -= 7; onTick && onTick(Math.max(a, 4)); if (a <= 4) { clearInterval(t); res({ lat: 43.5800 + Math.random() * 0.00005, lon: 21.3300 + Math.random() * 0.00005, acc: 4 }); } }, 300); });
+  return new Promise((res, rej) => {
+    if (!navigator.geolocation) return rej(new Error('Telefon ne daje lokaciju.'));
+    let best = null, done = false;
+    const stop = (fn, v) => { if (done) return; done = true; navigator.geolocation.clearWatch(w); clearTimeout(t); fn(v); };
+    const w = navigator.geolocation.watchPosition(p => {
+      const c = { lat: p.coords.latitude, lon: p.coords.longitude, acc: Math.round(p.coords.accuracy) };
+      if (!best || c.acc < best.acc) best = c;
+      onTick && onTick(c.acc);
+      if (c.acc <= MAPACC) stop(res, c);
+    }, e => { if (e.code === 1) stop(rej, new Error('Dozvoli aplikaciji pristup lokaciji (podešavanja pretraživača).')); }, { enableHighAccuracy: true, maximumAge: 0 });
+    const t = setTimeout(() => stop(rej, new Error(best ? `Signal nije dovoljno precizan (najbolje ±${best.acc} m, treba ±${MAPACC} m). Stani ispred ulaza, dalje od zidova i krošnji, pa pokušaj ponovo.` : 'Nema GPS signala. Izađi napolje i pokušaj ponovo.')), MAPWAIT);
+  });
+}
+// provera mesta pre prvog mapiranja: telefon mora biti blizu mesta kupca (OpenStreetMap, keš u telefonu)
+const TOWNKM = C.townRadiusKm || 15;
+async function townPos(name) {
+  const key = String(name || '').trim().toUpperCase(); if (!key) return null;
+  let cache = {}; try { cache = JSON.parse(localStorage.getItem('ak_towns_v1') || '{}'); } catch (e) { }
+  if (cache[key] !== undefined) return cache[key];
+  if (DEMO) { const demo = { 'KRUŠEVAC': { lat: 43.58, lon: 21.33 }, 'TRSTENIK': { lat: 43.617, lon: 21.0 }, 'KRAGUJEVAC': { lat: 44.012, lon: 20.911 }, 'NIŠ': { lat: 43.32, lon: 21.896 }, 'JAGODINA': { lat: 43.977, lon: 21.261 } }; return demo[key] || null; }
+  try {
+    const ctl = new AbortController(); setTimeout(() => ctl.abort(), 8000);
+    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=rs,ba,me&q=' + encodeURIComponent(name), { signal: ctl.signal, headers: { 'Accept-Language': 'sr' } });
+    const j = await r.json(); const v = j && j[0] ? { lat: +j[0].lat, lon: +j[0].lon } : null;
+    cache[key] = v; try { localStorage.setItem('ak_towns_v1', JSON.stringify(cache)); } catch (e) { }
+    return v;
+  } catch (e) { return undefined; } // nema mreže – ne može da se proveri
+}
 const fmtLoc = p => p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + ' (±' + p.acc + ' m)';
 function dist(a, b) { const R = 6371000, r = x => x * Math.PI / 180, dl = r(b.lat - a.lat), dn = r(b.lon - a.lon); const h = Math.sin(dl / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dn / 2) ** 2; return Math.round(2 * R * Math.asin(Math.sqrt(h))); }
 async function logEvent(type, pos, it, extra = {}) {
@@ -206,7 +237,6 @@ addEventListener('offline', () => { S.online = false; paintSync(); });
 function go(view, push = true) { S.view = view; if (push) history.pushState({ v: view }, ''); render(); scrollTo(0, 0); }
 addEventListener('popstate', () => {
   const back = { kupci: 'tereni', kartica: 'kupci', audit: 'kartica', kraj: 'tereni', krajposete: 'kartica', novi: S.teren !== null ? 'kupci' : 'tereni' }[S.view];
-  if (S.view === 'audit' && S.step > 0) { S.step--; history.pushState({ v: 'audit' }, ''); render(); return; }
   if (back) go(back, false);
 });
 
@@ -214,7 +244,9 @@ addEventListener('popstate', () => {
 function bar(title, back) {
   return `<header class="bar">${back ? `<button class="icon" data-a="back" aria-label="Nazad">←</button>` : ''}<h1>${esc(title)}</h1><span id="sync" class="sync"></span>${!back ? `<button class="icon" data-a="refresh" aria-label="Osveži">⟳</button>` : ''}</header>`;
 }
+function saveDraft() { if (S.visit && S.d && S.view === 'audit' && S.cur && S.cur.id === S.visit.id) { S.visit.draft = { d: S.d, step: S.step }; saveDay(); } }
 function render() {
+  saveDraft();
   let v = { tereni: vTereni, kupci: vKupci, kartica: vKartica, audit: vAudit, novi: vNovi, login: vLogin, kraj: vKraj, krajposete: vKrajPosete }[S.view] || vTereni;
   if (S.view !== 'login' && !dayOn() && !S.visit) v = vDan;
   $app.innerHTML = (DEMO ? '<div class="demo">Probni režim – izmišljeni kupci, ništa se ne šalje</div>' : '') + v();
@@ -259,7 +291,7 @@ async function dayEnd() {
   S.busy = false; S.view = 'tereni'; render();
 }
 function beginVisit(it, p) {
-  S.visit = { id: it.id, n: it.f.field_1 || it.f.Title, start: new Date().toISOString(), audit: false };
+  S.visit = { id: it.id, sifra: it.f.Title, n: it.f.field_1 || it.f.Title, start: new Date().toISOString(), audit: false };
   S.day.visits = S.day.visits || []; S.day.visits.push({ id: it.id, n: S.visit.n, s: S.visit.start }); saveDay();
 }
 async function visitStart() {
@@ -267,26 +299,36 @@ async function visitStart() {
   if (S.visit) { toast('Već je u toku poseta kod: ' + S.visit.n); return; }
   S.busy = true; render();
   try {
-    const p = await getPos();
-    if (p.acc > MAXACC) throw new Error(`GPS je neprecizan (±${p.acc} m). Sačekaj malo ili izađi napolje, pa pokušaj ponovo.`);
-    const home = parseLoc(it.f.Lokacija); let d = null;
+    const home = parseLoc(it.f.Lokacija); let d = null, p, mapped = false;
     if (home) {
+      p = await getPos();
+      if (p.acc > MAXACC) throw new Error(`GPS je neprecizan (±${p.acc} m). Sačekaj malo ili izađi napolje, pa pokušaj ponovo.`);
       d = dist(p, home);
-      if (d > RADIUS + p.acc) throw new Error(`Nisi na lokaciji kupca: udaljen si oko ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m'}. Poseta može da počne samo kod objekta.`);
+      if (d > RADIUS + p.acc + home.acc) throw new Error(`Nisi na lokaciji kupca: udaljen si oko ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m'}. Poseta može da počne samo kod objekta.`);
+      if (home.acc > MAPACC && p.acc <= MAPACC) mapped = true; // stara, slabija tačka – zameni boljom
     } else {
+      const town = it.f.field_4, tp = await townPos(town), here = await getPos();
+      if (tp && dist(here, tp) > TOWNKM * 1000 + here.acc) throw new Error(`Kupac je u mestu ${town}, a ti si oko ${Math.round(dist(here, tp) / 1000)} km od tog mesta. Lokacija objekta se beleži samo ispred objekta.`);
+      if (tp === undefined) S.townUnchecked = true;
+      S.busyMsg = 'Stani ispred ulaza, napolju · tražim signal…'; render();
+      p = await getPrecise(a => { S.busyMsg = `Stani ispred ulaza, napolju · ±${a} m${a <= MAPACC ? ' ✓' : '…'}`; const b = document.getElementById('busy'); if (b) b.textContent = S.busyMsg; });
+      mapped = true;
+    }
+    if (mapped) {
       it.f.Lokacija = fmtLoc(p); saveItems();
       await queue({ type: 'patch', itemId: it.id, fields: { Lokacija: it.f.Lokacija } });
     }
+    S.busyMsg = '';
     beginVisit(it, p);
-    await logEvent('POČETAK POSETE', p, it, d !== null ? { Udaljenost: d } : { Napomena: 'prva poseta: lokacija objekta zabeležena' });
+    await logEvent('POČETAK POSETE', p, it, Object.assign(d !== null ? { Udaljenost: d } : {}, mapped ? { Napomena: home ? 'lokacija objekta preciznije zabeležena' : 'prva poseta: lokacija objekta zabeležena' + (S.townUnchecked ? ' (mesto nije provereno – nema mreže)' : '') } : {})); S.townUnchecked = false;
     S.busy = false; render(); toast(home ? 'Poseta je počela.' : 'Poseta je počela. Lokacija objekta je zabeležena.');
-  } catch (e) { S.busy = false; render(); const el = document.getElementById('err'); if (el) el.textContent = e.message; else toast(e.message); }
+  } catch (e) { S.busy = false; S.busyMsg = ''; render(); const el = document.getElementById('err'); if (el) el.textContent = e.message; else toast(e.message); }
 }
 const VISH = ['obavljen razgovor', 'urađen audit', 'primljena porudžbina', 'kupac nije bio tu', 'objekat zatvoren', 'ostalo'];
 function vKrajPosete() {
   const it = S.items.find(x => x.id === S.visit.id) || S.cur, k = S.vk || (S.vk = { i: S.visit.audit ? 'urađen audit' : '', b: '' });
   return bar('Kraj posete', true) + `<main class="main">
-    <div class="t">${esc(S.visit.n)}</div><div class="s">Poseta od ${hhmm(S.visit.start)} · ${Math.max(1, Math.round((Date.now() - Date.parse(S.visit.start)) / 60000))} min${S.visit.audit ? ' · audit urađen' : ' · bez audita'}</div>
+    <div class="t">${esc(S.visit.n)}</div><div class="s">Poseta od ${hhmm(S.visit.start)} · ${Math.max(1, Math.round((Date.now() - Date.parse(S.visit.start)) / 60000))} min${S.visit.audit ? ' · audit urađen' : S.visit.draft ? ' · audit nije završen – nedovršeni podaci se ne čuvaju' : ' · bez audita'}</div>
     <div class="t" style="margin:16px 2px 8px">Ishod posete</div>
     <div class="opts">${VISH.map(x => `<button class="opt ${k.i === x ? 'on' : ''}" data-a="vish" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>
     <div class="fld" style="margin-top:14px"><label>Beleška o poseti</label><textarea id="vkb" placeholder="Šta je dogovoreno, šta treba uraditi…">${esc(k.b)}</textarea></div>
@@ -299,7 +341,7 @@ async function visitEnd() {
   const it = S.items.find(x => x.id === S.visit.id) || S.cur;
   S.busy = true; render();
   let p = null; try { p = await getPos(); } catch (e) { }
-  const home = it && parseLoc(it.f.Lokacija), extra = { Napomena: k.i + (k.b.trim() ? ': ' + k.b.trim() : '') + (S.visit.audit ? '' : ' (bez audita)') + (p ? '' : ' [lokacija nije dostupna]') };
+  const home = it && parseLoc(it.f.Lokacija), extra = { Napomena: k.i + (k.b.trim() ? ': ' + k.b.trim() : '') + (S.visit.audit ? '' : S.visit.draft ? ' (audit započet, nije završen)' : ' (bez audita)') + (p ? '' : ' [lokacija nije dostupna]') };
   if (p && home) extra.Udaljenost = dist(p, home);
   await logEvent('KRAJ POSETE', p, it, extra);
   if (k.b.trim() && it) {
@@ -319,7 +361,7 @@ function vTereni() {
   const all = stats(S.items);
   const td = S.items.filter(x => (x.f.DatumObilaska || '').slice(0, 10) === today()).length;
   return bar('Tereni') + `<main class="main">
-    ${S.visit ? `<div class="row" data-a="govisit" style="border-color:var(--brand)"><div class="grow"><div class="t">Poseta u toku</div><div class="s">${esc(S.visit.n)} · od ${hhmm(S.visit.start)}</div></div><div class="right">›</div></div>` : ''}
+    ${visitBanner()}
     <div class="sum"><div class="kpi"><span class="s">Obrađeno</span><b>${all.done} / ${all.tot}</b></div><div class="kpi"><span class="s">Danas</span><b>${td}</b></div></div>
     <div class="row" data-a="teren" data-v="*"><div class="grow"><div class="t">Svi kupci</div><div class="s">${all.tot} kupaca · promet 2026: ${money(all.prom)}</div><div class="prog"><i style="width:${all.pct}%"></i></div></div><div class="right s">${all.pct}%</div></div>
     ${keys.map(k => { const s = stats(groups[k]); return `<div class="row" data-a="teren" data-v="${esc(k)}"><div class="grow"><div class="t">${esc(k)}${k === 'Bez terena' ? ' <span class="badge warn">dodeliti</span>' : ''}</div><div class="s">${s.tot} kupaca · obrađeno ${s.done} · ${money(s.prom)}</div><div class="prog"><i style="width:${s.pct}%"></i></div></div><div class="right s">${s.done}/${s.tot}</div></div>`; }).join('')}
@@ -327,10 +369,14 @@ function vTereni() {
   </main><button class="fab" data-a="novi">＋ Nov kupac</button>`;
 }
 function inTeren() { return S.items.filter(it => S.teren === '*' || terenOf(it) === S.teren); }
+function visitBanner() {
+  return S.visit ? `<div class="row" data-a="govisit" style="border-color:var(--brand);background:var(--brand-bg,transparent)"><div class="grow"><div class="t">Poseta u toku: ${esc(S.visit.n)}</div><div class="s">od ${hhmm(S.visit.start)}${S.visit.draft ? ' · audit nedovršen, korak ' + (S.visit.draft.step + 1) + '/' + STEPS.length : S.visit.audit ? ' · audit urađen' : ''}</div></div><div class="right"><b>Nastavi ›</b></div></div>` : '';
+}
 function vKupci() {
   const { html, cnt } = kupciList();
   const title = S.teren === '*' ? 'Svi kupci' : S.teren;
   return bar(title, true) + `<main class="main">
+    ${visitBanner()}
     <input id="q" class="search" type="search" placeholder="Naziv, šifra, PIB, adresa…" value="${esc(S.q)}" data-i="q">
     <div class="seg">${[['open', 'Neobrađeni'], ['back', 'Vratiti se'], ['done', 'Obrađeni'], ['all', 'Svi']].map(([k, n]) => `<button class="${S.filter === k ? 'on' : ''}" data-a="filter" data-v="${k}">${n} ${cnt[k]}</button>`).join('')}</div>
     <div class="sorts">Redosled: ${[['promet', 'promet'], ['mesto', 'mesto i adresa'], ['naziv', 'naziv']].map(([k, n]) => `<button class="${S.sort === k ? 'on' : ''}" data-a="sort" data-v="${k}">${n}</button>`).join('')}</div>
@@ -395,15 +441,18 @@ function vKartica() {
   </main><div class="foot"><div class="in">${visitFoot(it, i)}</div></div>`;
 }
 function visitFoot(it, i) {
-  if (S.busy) return `<button class="btn pri" disabled>Tražim lokaciju…</button>`;
+  if (S.busy) return `<button class="btn pri" id="busy" disabled>${esc(S.busyMsg || 'Tražim lokaciju…')}</button>`;
   if (!S.visit) return `<button class="btn pri" data-a="visit">Započni posetu</button>`;
   if (S.visit.id !== it.id) return `<button class="btn" data-a="govisit">Poseta u toku: ${esc(S.visit.n)} ›</button>`;
+  if (S.visit.draft) return `<button class="btn" data-a="endvisit">Završi posetu</button><button class="btn pri" style="flex:2" data-a="start">Nastavi audit · korak ${S.visit.draft.step + 1}/${STEPS.length}</button>`;
   return `<button class="btn" data-a="endvisit">Završi posetu</button><button class="btn pri" style="flex:2" data-a="start">${S.visit.audit ? 'Audit je urađen · ponovi' : i ? 'Ponovi audit' : 'Pokreni audit'}</button>`;
 }
 
 /* ---------- audit ---------- */
-function startAudit() {
+function startAudit(fresh) {
   if (!S.visit || S.visit.id !== S.cur.id) { toast('Audit može samo tokom posete kod ovog kupca.'); return; }
+  if (S.visit.draft && !fresh) { S.d = S.visit.draft.d; S.step = S.visit.draft.step; go('audit'); return; }
+  if (fresh) { S.visit.draft = null; saveDay(); }
   const f = S.cur.f;
   const bsSeg = split(f.field_14)[0];
   S.d = {
@@ -418,7 +467,7 @@ function startAudit() {
     NabavljaOd: f.NabavljaOd || '', AuditPlanObilaska: cv(f.AuditPlanObilaska) || '', AuditMonitoring: !!f.AuditMonitoring,
     Lokacija: f.Lokacija || '', Beleske: '', AuditIshod: '', _bsSeg: bsSeg
   };
-  S.photos = []; S.step = 0; go('audit');
+  S.photos = []; S.step = 0; S.visit.draft = { d: S.d, step: 0 }; saveDay(); go('audit');
 }
 function vAudit() {
   const st = STEPS[S.step], d = S.d, f = S.cur.f;
@@ -488,7 +537,8 @@ async function finishAudit() {
   await queue({ type: 'patch', itemId: S.cur.id, fields });
   for (const p of S.photos) await queue({ type: 'photo', name: p.name, blob: p.blob });
   S.photos.forEach(p => URL.revokeObjectURL(p.url)); S.photos = [];
-  if (S.visit && S.visit.id === S.cur.id) { S.visit.audit = true; saveDay(); }
+  if (S.visit && S.visit.id === S.cur.id) { S.visit.audit = true; S.visit.draft = null; saveDay(); }
+  S.d = null;
   await logEvent('AUDIT', null, S.cur, { Napomena: d.AuditIshod });
   toast((navigator.onLine || DEMO ? 'Audit je sačuvan.' : 'Audit je sačuvan u telefonu, šalje se kad bude mreže.') + ' Poseta i dalje traje.');
   S.step = 0; history.back();
@@ -509,8 +559,10 @@ async function saveNovi() {
   const fields = { Title: code, field_1: v('n_naziv'), field_3: v('n_adresa'), field_4: v('n_mesto'), field_5: v('n_tel'), field_7: v('n_kontakt'), StatusNovi: 'potencijalni' };
   if (S.teren && S.teren !== '*' && S.teren !== 'Bez terena') fields.AuditTeren = S.teren;
   if (S.visit) { document.getElementById('err').textContent = 'Prvo završi posetu kod: ' + S.visit.n; return; }
-  let p; try { toast('Tražim lokaciju…'); p = await getPos(); } catch (e) { document.getElementById('err').textContent = e.message; return; }
-  if (p.acc > MAXACC) { document.getElementById('err').textContent = `GPS je neprecizan (±${p.acc} m). Sačekaj malo pa pokušaj ponovo.`; return; }
+  const btn = document.querySelector('[data-a=novisave]'), er = document.getElementById('err'); let p;
+  btn.disabled = true; btn.textContent = 'Stani ispred ulaza, napolju · tražim signal…'; er.textContent = '';
+  try { p = await getPrecise(a => { btn.textContent = `Stani ispred ulaza, napolju · ±${a} m${a <= MAPACC ? ' ✓' : '…'}`; }); }
+  catch (e) { er.textContent = e.message; btn.disabled = false; btn.textContent = 'Upiši i pokreni audit'; return; }
   fields.Lokacija = fmtLoc(p);
   const it = { id: 'tmp' + now.getTime(), f: { ...fields } };
   S.items.push(it); saveItems();
@@ -552,6 +604,7 @@ document.addEventListener('click', async e => {
     case 'visit': await visitStart(); break;
     case 'govisit': S.cur = S.items.find(x => x.id === S.visit.id) || S.cur; go('kartica'); break;
     case 'endvisit': S.vk = null; go('krajposete'); break;
+    case 'startnew': startAudit(true); break;
     case 'vish': S.vk.b = document.getElementById('vkb').value; S.vk.i = S.vk.i === v ? '' : v; rerender(); break;
     case 'endvisitsave': await visitEnd(); break;
     case 'prev': if (S.step) { S.step--; go('audit', false); } else history.back(); break;
@@ -563,7 +616,7 @@ document.addEventListener('input', e => {
   if (k === 'q') { S.q = e.target.value; const l = document.getElementById('list'); if (l) l.innerHTML = kupciList().html; return; }
   if (k === 'optq') { const q = e.target.value.toLowerCase(); document.querySelectorAll('#opts .opt').forEach(b => b.style.display = b.textContent.toLowerCase().includes(q) ? '' : 'none'); return; }
   if (k === 'photo') return;
-  if (S.d) S.d[k] = e.target.value;
+  if (S.d) { S.d[k] = e.target.value; saveDraft(); }
 });
 document.addEventListener('change', async e => {
   if (e.target.dataset.i !== 'photo' || !e.target.files.length) return;
@@ -608,14 +661,20 @@ async function refresh(manual) {
     if (manual) toast('Osveženo: ' + S.items.length + ' kupaca.');
   } catch (e) { console.warn(e); toast('Osvežavanje nije uspelo: ' + String(e.message || e).slice(0, 80)); }
 }
+// ako je aplikacija zatvorena tokom posete, vrati se pravo na tog kupca
+function resumeVisit() {
+  if (!S.visit) return false;
+  const it = S.items.find(x => x.id === S.visit.id || (x.f.Title && x.f.Title === S.visit.sifra)); if (!it) return false;
+  S.cur = it; go('kartica'); toast('Nastavljaš posetu: ' + S.visit.n); return true;
+}
 async function boot() {
   history.replaceState({ v: 'tereni' }, '');
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  if (DEMO) { S.items = demoItems(); S.view = 'tereni'; render(); return; }
+  if (DEMO) { S.items = demoItems(); S.view = 'tereni'; resumeVisit() || render(); return; }
   try { await initAuth(); } catch (e) { $app.innerHTML = `<div class="login"><h1>Greška pri prijavi</h1><p class="s">${esc(e.message)}</p></div>`; return; }
   if (!S.account) { S.view = 'login'; render(); return; }
   const cached = loadCached();
-  if (cached) { S.items = cached; render(); }
+  if (cached) { S.items = cached; resumeVisit() || render(); }
   await countPending();
   await refresh(false);
   if (!cached && !S.items.length) render();
