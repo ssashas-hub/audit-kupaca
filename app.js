@@ -1143,12 +1143,12 @@ async function syncLoadCache() {
 async function syncFetch() {
   if (DEMO || !navigator.onLine) return;
   await resolveList();
-  const ch = await g('/sites/' + S.site + '/drive/root:/Sinhronizacija:/children?$select=name,eTag,@microsoft.graph.downloadUrl&$top=50');
+  const ch = await g('/sites/' + S.site + '/drive/root:/Sinhronizacija:/children?$top=50');
   const c = ('caches' in window) ? await caches.open('ak-sync') : null;
   for (const f of ch.value) {
     const n = f.name.replace(/\.json$/, ''); if (!SYNC_FILES.includes(n)) continue;
     if (S.SYtag[n] === f.eTag && S.SY[n]) continue;
-    const r = await fetch(f['@microsoft.graph.downloadUrl']); if (!r.ok) continue;
+    const r = f['@microsoft.graph.downloadUrl'] ? await fetch(f['@microsoft.graph.downloadUrl']) : await fetch('https://graph.microsoft.com/v1.0/sites/' + S.site + '/drive/root:/Sinhronizacija/' + f.name + ':/content', { headers: { Authorization: 'Bearer ' + await token() } }); if (!r.ok) continue;
     const txt = await r.text();
     try { S.SY[n] = JSON.parse(txt); S.SYtag[n] = f.eTag; if (c) await c.put('/sync/' + n + '.json', new Response(txt, { headers: { 'Content-Type': 'application/json' } })); } catch (e) { console.warn('sync', n, e); }
   }
