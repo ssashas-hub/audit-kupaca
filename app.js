@@ -173,9 +173,10 @@ const FDEF = {
   vel: { t: 'Veličina', get: it => [cv(it.f.Velicina) || 'nije upisana'] },
   pot: { t: 'Potencijal', get: it => [cv(it.f.Potencijal) || 'nije upisan'] },
   ob: { t: 'Oznaka „obići”', get: it => [it.f.Obici ? 'označen' : 'nije označen'] },
-  lok: { t: 'Lokacija objekta', get: it => [parseLoc(it.f.Lokacija) ? 'zabeležena' : 'nije zabeležena'] }
+  lok: { t: 'Lokacija objekta', get: it => [parseLoc(it.f.Lokacija) ? 'zabeležena' : 'nije zabeležena'] },
+  fin: { t: 'Plaćanje (BizniSoft)', get: it => { const f = finOf(it), b = bsKupac(it), o = []; if (b && String(b.blok) === '1') o.push('blokiran'); if (f && f.d > 0 && f.m > 30) o.push('kasni više od 30 dana'); if (f && f.d > 0) o.push('ima dospeli dug'); if (f && f.s > 0) o.push('ima saldo'); if (!o.length) o.push('bez duga'); return o; } }
 };
-const MAINF = ['pravac', 'kat', 'tip', 'poz', 'raz'], MOREF = ['st', 'plac', 'op', 'plan', 'vel', 'pot', 'ob', 'lok'];
+const MAINF = ['pravac', 'kat', 'tip', 'poz', 'raz'], MOREF = ['fin', 'st', 'plac', 'op', 'plan', 'vel', 'pot', 'ob', 'lok'];
 const LS_FLT = 'ak_flt_v1';
 S.flt = {}; S.dq = ''; S.onlyDue = true; S.obOpen = true;
 try { const x = JSON.parse(localStorage.getItem(LS_FLT) || 'null'); if (x && x.date === new Date().toLocaleDateString('sr-RS')) S.flt = x.f || {}; } catch (e) { }
@@ -621,7 +622,7 @@ function danasList() {
 function rowPlan({ it, d }) {
   const f = it.f, k = klasaOf(it);
   const when = !d ? 'plan: ' + esc(planOf(it).label) : d.ob ? (d.lv ? 'obići · poslednja poseta ' + fmtDate(d.lv) : 'obići · još nije obiđen') : d.never ? 'nikad obiđen' : `poslednja poseta ${fmtDate(d.lv)} · ` + (d.over > 0 ? `<b class="late">kasni ${d.over} d</b>` : d.over === 0 ? '<b class="late">danas na redu</b>' : `na redu za ${-d.over} d`);
-  const badges = (cv(f.StatusNovi) === 'potencijalni' ? '<span class="badge brand">potencijalni</span> ' : '') + (S.visit && S.visit.id === it.id ? '<span class="badge ok">poseta u toku</span>' : '');
+  const badges = finFlag(it) + (cv(f.StatusNovi) === 'potencijalni' ? '<span class="badge brand">potencijalni</span> ' : '') + (S.visit && S.visit.id === it.id ? '<span class="badge ok">poseta u toku</span>' : '');
   const sm = S.selMode, on = sm && S.sel && S.sel.has(String(it.id)), inP = sm && planOfDay(S.pday || ymd()).some(p => p.f.Title === String(f.Title));
   return `<div class="row ${on ? 'sel' : ''}" data-a="${sm ? 'selrow' : 'kupac'}" data-v="${esc(it.id)}">${sm ? `<span class="ckb">${on ? '✓' : inP ? '•' : ''}</span>` : ''}<div class="grow"><div class="t ell">${esc(f.field_1 || f.Title)}${inP ? ' <span class="badge">u planu</span>' : ''}</div><div class="s ell">${esc([f.field_3, f.field_4].filter(Boolean).join(', ') || '—')}</div><div class="s">${when}</div>${badges ? `<div>${badges}</div>` : ''}</div><div class="right">${k ? `<div class="kl">${k}</div>` : ''}<div class="s">${money(f.field_19)}</div></div></div>`;
 }
@@ -783,8 +784,9 @@ function kupciList() {
 }
 function rowKupac(it) {
   const f = it.f, i = cv(f.AuditIshod), d = daysAgo(f.field_20);
-  const badge = i === 'vratiti se' ? '<span class="badge warn">vratiti se</span>' : f.Obradjeno ? '<span class="badge ok">obrađen</span>' : String(f.Title).startsWith('NOVO') ? '<span class="badge brand">nov</span>' : '';
-  return `<div class="row" data-a="kupac" data-v="${esc(it.id)}"><div class="grow"><div class="t ell">${esc(f.field_1 || f.Title)}</div><div class="s ell">${esc([f.field_3, f.field_4].filter(Boolean).join(', ') || '—')}</div><div class="s">${esc(cv(f.AuditSegment) || f.field_14 || 'bez segmenta')}</div></div><div class="right"><div class="t">${money(f.field_19)}</div><div class="s">${d === null ? '' : d === 0 ? 'danas' : 'pre ' + d + ' d'}</div>${badge}</div></div>`;
+  const badge = i === 'vratiti se' ? '<span class="badge warn">vratiti se</span>' : f.Obradjeno ? '<span class="badge ok">obrađen</span>' : String(f.Title).startsWith('NOVO') ? '<span class="badge brand">nov</span>' : ''
+  const badge2 = badge + ' ' + finFlag(it);
+  return `<div class="row" data-a="kupac" data-v="${esc(it.id)}"><div class="grow"><div class="t ell">${esc(f.field_1 || f.Title)}</div><div class="s ell">${esc([f.field_3, f.field_4].filter(Boolean).join(', ') || '—')}</div><div class="s">${esc(cv(f.AuditSegment) || f.field_14 || 'bez segmenta')}</div></div><div class="right"><div class="t">${money(f.field_19)}</div><div class="s">${d === null ? '' : d === 0 ? 'danas' : 'pre ' + d + ' d'}</div>${badge2}</div></div>`;
 }
 function vKartica() {
   const it = S.cur; if (!it) return vTereni(); const f = it.f;
@@ -819,8 +821,9 @@ function vKartica() {
     ${modOn('zad') ? (() => { const Z = custTasks(f.Title).sort((a, b) => (a.f.Status === 'urađen') - (b.f.Status === 'urađen') || num(a.f.Prioritet) - num(b.f.Prioritet)).slice(0, 8); return Z.length ? `<div class="sech"><span>Zadaci kod ovog kupca</span></div>${Z.map(z => taskHtml(z)).join('')}` : ''; })() : ''}
     ${modOn('konk') ? (() => { const K = S.X.konk.filter(k => k.f.KupacSifra === String(f.Title)).sort((a, b) => String(b.f.Vreme).localeCompare(String(a.f.Vreme)))[0]; return K ? `<div class="card" style="margin-top:8px"><b>Konkurencija</b> (${fmtDate(K.f.Vreme)}): ${esc(K.f.Konkurenti)}${K.f.Grupe ? ' · ' + esc(K.f.Grupe) : ''}${K.f.Cene ? ' · cene: ' + esc(K.f.Cene) : ''}${K.f.Uslovi ? ' · uslovi: ' + esc(K.f.Uslovi) : ''}${K.f.Napomena ? '<div class="s">' + esc(K.f.Napomena) + '</div>' : ''}</div>` : ''; })() : ''}
     ${(() => { const d = dueOf(it), p = planOf(it); return `<div class="card plan"><b>Plan obilaska:</b> ${esc(p.label)}${d && !d.top ? ` · ${d.over > 0 ? '<b class="late">kasni ' + d.over + ' d</b>' : d.over === 0 ? '<b class="late">danas na redu</b>' : 'na redu za ' + (-d.over) + ' d'}` : d && d.never ? ' · nikad obiđen' : ''}${it.f.Obici ? ' · <span class="badge warn">obići</span>' : ''}</div>`; })()}
-    <div class="seg ktabs"><button class="${S.ktab !== 'posete' ? 'on' : ''}" data-a="ktab" data-v="pregled">Pregled</button><button class="${S.ktab === 'posete' ? 'on' : ''}" data-a="ktab" data-v="posete">Posete i beleške · ${visitHistory(it).length}</button></div>
-    ${S.ktab === 'posete' ? vPosete(it) : `
+    <div class="seg ktabs"><button class="${S.ktab !== 'posete' && S.ktab !== 'dok' ? 'on' : ''}" data-a="ktab" data-v="pregled">Pregled</button><button class="${S.ktab === 'posete' ? 'on' : ''}" data-a="ktab" data-v="posete">Posete · ${visitHistory(it).length}</button>${modOn('fin') && S.SY.dokumenta ? `<button class="${S.ktab === 'dok' ? 'on' : ''}" data-a="ktab" data-v="dok">Dokumenta</button>` : ''}</div>
+    ${S.ktab === 'posete' ? vPosete(it) : S.ktab === 'dok' ? vDokumenta(it) : `
+    ${modOn('fin') ? finBlock(it) + prometBlock(it) + stavkeBlock(it) : ''}
     <h2>Trenutno u BizniSoft-u</h2>
     <div class="card"><dl class="kv">
       <dt>Status</dt><dd>${esc(f.field_11 || '—')}</dd>
@@ -990,6 +993,8 @@ document.addEventListener('click', async e => {
     case 'kupac': S.cur = S.items.find(x => String(x.id) === v); S.from = S.view; S.ktab = 'pregled'; go('kartica'); break;
     case 'tab': S.view = v; S.showAll = false; history.replaceState({ v }, ''); render(); scrollTo(0, 0); break;
     case 'fsel': await openFilter(v); break;
+    case 'fintoggle': S.finOpen = !S.finOpen; rerender(); break;
+    case 'sttoggle': S.stOpen = !S.stOpen; rerender(); break;
     case 'pday': { let d = v; if (v === 'cal') d = await askDate('Izaberi dan za plan', S.pday && S.pday !== ymd() ? S.pday : addDays(ymd(), 2)); if (d) { S.pday = d; S.selMode = false; S.sel = new Set(); render(); } break; }
     case 'pup': planMove(v, -1); break;
     case 'pdn': planMove(v, 1); break;
@@ -1127,6 +1132,73 @@ const addDays = (s, n) => { const x = new Date(s + 'T12:00:00'); x.setDate(x.get
 const dLabel = s => { const t = ymd(); if (s === t) return 'danas'; if (s === addDays(t, 1)) return 'sutra'; if (s === addDays(t, 2)) return 'prekosutra'; if (s === addDays(t, -1)) return 'juče'; return new Date(s + 'T12:00:00').toLocaleDateString('sr-Latn-RS', { weekday: 'short', day: 'numeric', month: 'numeric' }); };
 const DOW = ['nedelja', 'ponedeljak', 'utorak', 'sreda', 'četvrtak', 'petak', 'subota'];
 
+/* ---------- podaci iz BizniSoft-a (folder Sinhronizacija, puni ga program na serveru) ---------- */
+const SYNC_FILES = ['finansije', 'promet', 'dokumenta', 'stavke', 'kupci', 'stanje'];
+S.SY = {}; S.SYtag = {};
+try { S.SYtag = JSON.parse(localStorage.getItem('ak_sytag_v1') || '{}'); } catch (e) { }
+async function syncLoadCache() {
+  if (!('caches' in window)) return;
+  try { const c = await caches.open('ak-sync'); for (const n of SYNC_FILES) { const r = await c.match('/sync/' + n + '.json'); if (r) S.SY[n] = await r.json(); } } catch (e) { console.warn('sync cache', e); }
+}
+async function syncFetch() {
+  if (DEMO || !navigator.onLine) return;
+  await resolveList();
+  const ch = await g('/sites/' + S.site + '/drive/root:/Sinhronizacija:/children?$select=name,eTag,@microsoft.graph.downloadUrl&$top=50');
+  const c = ('caches' in window) ? await caches.open('ak-sync') : null;
+  for (const f of ch.value) {
+    const n = f.name.replace(/\.json$/, ''); if (!SYNC_FILES.includes(n)) continue;
+    if (S.SYtag[n] === f.eTag && S.SY[n]) continue;
+    const r = await fetch(f['@microsoft.graph.downloadUrl']); if (!r.ok) continue;
+    const txt = await r.text();
+    try { S.SY[n] = JSON.parse(txt); S.SYtag[n] = f.eTag; if (c) await c.put('/sync/' + n + '.json', new Response(txt, { headers: { 'Content-Type': 'application/json' } })); } catch (e) { console.warn('sync', n, e); }
+  }
+  try { localStorage.setItem('ak_sytag_v1', JSON.stringify(S.SYtag)); } catch (e) { }
+}
+const bsKey = it => { const v = it && (it.f.Centrala || it.f.Title); const n = Number(v); return isNaN(n) ? '' : String(n); };
+const finOf = it => (S.SY.finansije && S.SY.finansije.k[bsKey(it)]) || null;
+const bsKupac = it => { const k = bsKey(it); if (!k || !S.SY.kupci) return null; if (!S.SY._kmap) { S.SY._kmap = {}; S.SY.kupci.kupci.forEach(x => S.SY._kmap[String(x.s)] = x); } return S.SY._kmap[k] || null; };
+function finFlag(it) {
+  const f = finOf(it), b = bsKupac(it);
+  if (b && String(b.blok) === '1') return '<span class="badge bad">blokiran</span>';
+  if (f && f.d > 0 && f.m > 30) return `<span class="badge bad">kasni ${f.m} d</span>`;
+  if (f && f.d > 0) return `<span class="badge warn">dospelo ${money(f.d)}</span>`;
+  return '';
+}
+const ago = s => s ? Math.floor((Date.now() - Date.parse(s)) / 864e5) : null;
+function finBlock(it) {
+  if (!modOn('fin')) return '';
+  const f = finOf(it), b = bsKupac(it), gen = S.SY.finansije && S.SY.finansije.gen;
+  if (!S.SY.finansije) return '';
+  const lim = b && Number(b.lim) > 0 ? Number(b.lim) : 0;
+  if (!f) return `<div class="card fin ok"><b>Finansije:</b> nema duga${b && String(b.blok) === '1' ? ' · <b class="late">BLOKIRAN</b>' : ''}<div class="s">stanje iz BizniSoft-a ${fmtDate(gen)} ${hhmm(gen)}</div></div>`;
+  const late = f.d > 0;
+  return `<div class="card fin ${late ? 'bad' : ''}">
+    <div class="fgrid"><div><span class="s">Saldo</span><b>${money(f.s)}</b></div><div><span class="s">Dospelo</span><b class="${late ? 'late' : ''}">${money(f.d)}</b></div><div><span class="s">Kasni najviše</span><b class="${f.m > 30 ? 'late' : ''}">${f.m ? f.m + ' d' : '—'}</b></div><div><span class="s">Poslednja uplata</span><b>${f.u ? fmtDate(f.u) : '—'}</b>${f.u ? `<span class="s">${money(f.ui)} · pre ${ago(f.u)} d</span>` : ''}</div></div>
+    ${lim ? `<div class="s">Kreditni limit ${money(lim)}${f.s > lim ? ' · <b class="late">prekoračen</b>' : ''}</div>` : ''}${b && String(b.blok) === '1' ? '<div><b class="late">Kupac je BLOKIRAN u BizniSoft-u</b></div>' : ''}
+    ${f.n ? `<button class="sec" data-a="fintoggle">${S.finOpen ? '▾' : '▸'} Neplaćene fakture · ${f.n}</button>${S.finOpen ? `<table class="tbl">${f.o.map(o => { const d = ago(o[2]); return `<tr><td>${esc(String(o[0]).replace(/^VFNL\w+-VFNL\w+-/, 'KA-'))}<div class="s">${fmtDate(o[1])}</div></td><td>${money(o[4])}${o[4] !== o[3] ? `<div class="s">od ${money(o[3])}</div>` : ''}</td><td>${o[2] ? fmtDate(o[2]) : ''}${d > 0 ? `<div class="late s">kasni ${d} d</div>` : ''}</td></tr>`; }).join('')}</table>` : ''}` : ''}
+    <div class="s">stanje iz BizniSoft-a ${fmtDate(gen)} ${hhmm(gen)}</div></div>`;
+}
+function prometBlock(it) {
+  const P = S.SY.promet && S.SY.promet.k[bsKey(it)]; if (!P) return '';
+  const now = new Date(), ms = []; for (let i = 23; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); ms.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')); }
+  const v = ms.map(m => (P.m[m] || [0])[0]), last12 = v.slice(12).reduce((a, b) => a + b, 0), prev12 = v.slice(0, 12).reduce((a, b) => a + b, 0), mx = Math.max(1, ...v.slice(12));
+  const tr = prev12 ? Math.round((last12 - prev12) / prev12 * 100) : null;
+  return `<div class="card"><div class="fgrid"><div><span class="s">Promet 12 mes.</span><b>${money(last12)}</b></div><div><span class="s">Prethodnih 12</span><b>${money(prev12)}</b></div><div><span class="s">Trend</span><b class="${tr !== null && tr < -10 ? 'late' : ''}">${tr === null ? '—' : (tr > 0 ? '+' : '') + tr + '%'}</b></div><div><span class="s">Poslednja kupovina</span><b>${P.z ? fmtDate(P.z) : '—'}</b></div></div>
+    <div class="bars">${ms.slice(12).map((m, i) => `<div title="${m}: ${money(v[12 + i])}"><i style="height:${Math.round(v[12 + i] / mx * 100)}%"></i><span>${m.slice(5)}</span></div>`).join('')}</div></div>`;
+}
+function stavkeBlock(it) {
+  const st = S.SY.stavke; const L = st && st.k[bsKey(it)]; if (!L) return '';
+  const A = st.artikli, now = Date.now();
+  const top = L.slice(0, 10), stopped = L.filter(x => x[3] && (now - Date.parse(x[3])) / 864e5 > 90 && x[4] >= 2).slice(0, 10);
+  const row = x => `<tr><td>${esc((A[x[0]] || [x[0]])[0])}<div class="s">${esc((A[x[0]] || [])[1] || x[0])}</div></td><td>${money(x[2])}</td><td class="s">${fmtDate(x[3])}</td></tr>`;
+  return `<button class="sec" data-a="sttoggle">${S.stOpen ? '▾' : '▸'} Šta kupuje (12 meseci)</button>${S.stOpen ? `<table class="tbl">${top.map(row).join('')}</table>${stopped.length ? `<div class="sh" style="margin-top:10px">⚠ Prestao da kupuje (ranije redovno, nije kupio 90+ dana)</div><table class="tbl">${stopped.map(row).join('')}</table>` : ''}` : ''}`;
+}
+function vDokumenta(it) {
+  const D = S.SY.dokumenta && S.SY.dokumenta.k[bsKey(it)];
+  if (!D) return '<div class="empty">Nema dokumenata u poslednjih 12 meseci (ili podaci još nisu stigli).</div>';
+  const N = { FA: 'Faktura', PF: 'Profaktura', NK: 'Narudžbina', PK: 'Povraćaj', OK: 'Odobrenje' };
+  return `<table class="tbl">${D.map(d => `<tr><td><b>${N[d[0]] || d[0]}</b><div class="s">${esc(d[1])}</div></td><td>${fmtDate(d[2])}</td><td>${money(d[3])}<div class="s">${d[6]} st.</div></td></tr>`).join('')}</table><p class="s">stanje iz BizniSoft-a ${fmtDate(S.SY.dokumenta.gen)} ${hhmm(S.SY.dokumenta.gen)}</p>`;
+}
 /* ---------- liste ---------- */
 const XL = { plan: 'Plan poseta', zad: 'Zadaci', por: 'Poruke', ods: 'Odsustva', konk: 'Konkurencija', pod: 'Podešavanja' };
 const LS_X = 'ak_x_v1';
@@ -1220,7 +1292,7 @@ async function notifyTeams(za, text) {
 }
 /* ---------- podešavanja (admin) ---------- */
 const DEF_SET = {
-  moduli: { '*': { plan: 1, zad: 1, por: 1, konk: 1, pot: 1, ods: 1, mapa: 1 } },
+  moduli: { '*': { fin: 1, plan: 1, zad: 1, por: 1, konk: 1, pot: 1, ods: 1, mapa: 1 } },
   podsetnik: '17:30',
   konkurenti: ['Špajz', 'Viva', 'Macrobiotic', 'NS COM', 'Mrvica'],
   praznici: ['2026-01-01', '2026-01-02', '2026-01-07', '2026-02-16', '2026-02-17', '2026-04-10', '2026-04-11', '2026-04-12', '2026-04-13', '2026-05-01', '2026-05-02', '2026-11-11', '2027-01-01', '2027-01-02', '2027-01-07', '2027-02-15', '2027-02-16', '2027-04-30', '2027-05-01', '2027-05-02', '2027-05-03', '2027-05-04', '2027-11-11'],
@@ -1233,6 +1305,7 @@ const DEF_SET = {
   razlozi: ['nije stigao, nestalo vremena', 'kupac zatvoren ili odsutan', 'promena plana, hitno drugo', 'kupac otkazao ili tražio drugi termin', 'put ili vreme', 'ostalo'],
   vrsteOdsustva: ['godišnji odmor', 'bolovanje', 'slobodan dan', 'službeno drugde', 'ostalo'],
   predlogBroj: 12,
+  sinhronizacija: { kupci: 60, promet: 60, dokumenta: 30, finansije: 30, stavke: 1440, od: 7, do: 19, nocu: 2 },
   kpi: { posetaDnevno: null, postovanjePlana: null, primarniZadaci: null },
   pragoviPotencijala: { 1: '', 2: '', 3: '', 4: '', 5: '' }
 };
@@ -1245,7 +1318,7 @@ function putSet(k, v) {
   const it = S.X.pod.find(x => x.f.Title === k), val = JSON.stringify(v);
   if (it) xSet('pod', it, { Vrednost: val, Izmenio: me() }); else xAdd('pod', { Title: k, Vrednost: val, Izmenio: me() });
 }
-const MODS = [['plan', 'Planiranje'], ['zad', 'Zadaci'], ['por', 'Poruke'], ['konk', 'Konkurencija'], ['pot', 'Potencijal 1–5'], ['ods', 'Odsustva'], ['mapa', 'Mapa i ruta']];
+const MODS = [['fin', 'Finansije i dokumenta'], ['plan', 'Planiranje'], ['zad', 'Zadaci'], ['por', 'Poruke'], ['konk', 'Konkurencija'], ['pot', 'Potencijal 1–5'], ['ods', 'Odsustva'], ['mapa', 'Mapa i ruta']];
 function modOn(m, user) {
   const s = getSet('moduli'), u = (user || me()).toLowerCase();
   const v = s[u] && m in s[u] ? s[u][m] : s['*'] && m in s['*'] ? s['*'][m] : 1;
@@ -1714,6 +1787,10 @@ function vAdmin() {
   return bar('Admin') + `<main class="main wide">
     <h2>Moduli po korisniku</h2><p class="s">Kvačica = ekran je uključen. „Svi” važi za one koji nemaju svoje podešavanje.</p>
     <div class="card" style="overflow:auto"><table class="tbl"><tr><th>Korisnik</th>${MODS.map(([, n]) => `<th>${n}</th>`).join('')}</tr>${users.map(u => `<tr><td>${u === '*' ? '<b>Svi</b>' : esc(nameOf(u)) + `<div class="s">${esc(ROLES[u] || '')}</div>`}</td>${MODS.map(([m]) => { const on = u === '*' ? !!(mods['*'] || {})[m] : modOn(m, u); return `<td><input type="checkbox" data-mod="${esc(u)}|${m}" ${on ? 'checked' : ''}></td>`; }).join('')}</tr>`).join('')}</table></div>
+    <h2>Sinhronizacija sa BizniSoft-om</h2>
+    ${(() => { const sy = getSet('sinhronizacija'), st = S.SY.stanje; const N = { kupci: 'Kupci i jedinice', promet: 'Promet', dokumenta: 'Dokumenta', finansije: 'Finansije', stavke: 'Stavke (šta kupuje)' };
+      return `<div class="card" style="overflow:auto"><table class="tbl"><tr><th>Skup</th><th>Na koliko minuta</th><th>Poslednje osvežavanje</th><th>Rezultat</th></tr>${Object.keys(N).map(k => { const x = st && st.skupovi && st.skupovi[k]; return `<tr><td>${N[k]}</td><td><input class="dinp" style="width:90px;margin:0" type="number" min="0" data-sync="${k}" value="${esc(sy[k])}"></td><td>${x ? fmtDate(x.last) + ' ' + hhmm(x.last) : '—'}</td><td class="${x && !x.ok ? 'late' : ''}">${x ? esc(x.poruka || '') : '—'}</td></tr>`; }).join('')}</table>
+      <p class="s">0 = isključeno · 1440 = jednom noću. Radno vreme za češće osvežavanje: od <input class="dinp" style="width:60px;display:inline-block;margin:0" type="number" data-sync="od" value="${esc(sy.od)}"> do <input class="dinp" style="width:60px;display:inline-block;margin:0" type="number" data-sync="do" value="${esc(sy.do)}"> h, noćno osvežavanje u <input class="dinp" style="width:60px;display:inline-block;margin:0" type="number" data-sync="nocu" value="${esc(sy.nocu)}"> h. Program na serveru čita ova podešavanja na svakih 5 minuta.${st ? ' Server: ' + esc(st.server || '') + ', poslednji rad ' + fmtDate(st.gen) + ' ' + hhmm(st.gen) : ''}</p></div>`; })()}
     <h2>Šabloni poruka i zadataka</h2><p class="s">Jedan šablon po redu.</p>
     <div class="agrid"><div><div class="sh">Call centar → Petar</div>${ta('sab.op2kom', sab.op2kom.join('\n'))}</div><div><div class="sh">Petar → call centar</div>${ta('sab.kom2op', sab.kom2op.join('\n'))}</div><div><div class="sh">Petar → magacin</div>${ta('sab.kom2mag', sab.kom2mag.join('\n'))}</div><div><div class="sh">Odgovori dodirom</div>${ta('sab.odgovori', sab.odgovori.join('\n'))}</div></div>
     <div class="agrid"><div><div class="sh">Konkurenti</div>${ta('konkurenti', getSet('konkurenti').join('\n'))}${Object.keys(counts).length ? `<div class="s">Ručno upisani: ${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => esc(k) + ' (' + n + ')').join(', ')}</div>` : ''}</div><div><div class="sh">Razlozi za neobiđene</div>${ta('razlozi', getSet('razlozi').join('\n'))}</div><div><div class="sh">Praznici (GGGG-MM-DD)</div>${ta('praznici', getSet('praznici').join('\n'), 8)}</div><div><div class="sh">Vrste odsustva</div>${ta('vrsteOdsustva', getSet('vrsteOdsustva').join('\n'))}</div></div>
@@ -1725,6 +1802,7 @@ function adminSave() {
   const mods = getSet('moduli');
   document.querySelectorAll('[data-mod]').forEach(c => { const [u, m] = c.dataset.mod.split('|'); mods[u] = mods[u] || {}; mods[u][m] = c.checked ? 1 : 0; });
   putSet('moduli', mods);
+  const sy = getSet('sinhronizacija'); document.querySelectorAll('[data-sync]').forEach(i => sy[i.dataset.sync] = Math.max(0, num(i.value))); putSet('sinhronizacija', sy);
   const lines = k => document.querySelector(`[data-set="${k}"]`).value.split('\n').map(x => x.trim()).filter(Boolean);
   const sab = { op2kom: lines('sab.op2kom'), kom2op: lines('sab.kom2op'), kom2mag: lines('sab.kom2mag'), odgovori: lines('sab.odgovori') };
   putSet('sabloni', sab); putSet('konkurenti', lines('konkurenti')); putSet('razlozi', lines('razlozi')); putSet('praznici', lines('praznici')); putSet('vrsteOdsustva', lines('vrsteOdsustva'));
@@ -1781,6 +1859,7 @@ async function refresh(manual) {
     S.items = fresh.concat(tmp);
     try { await fetchLog(); } catch (e) { console.warn('log', e); }
     try { await fetchAllX(); } catch (e) { console.warn('x', e); }
+    try { await syncFetch(); } catch (e) { console.warn('sync', e); }
     // ponovo primeni izmene koje još čekaju
     pend.filter(o => o.type === 'patch').forEach(o => { const it = S.items.find(x => x.id === o.itemId); if (it) Object.keys(o.fields).forEach(k => { if (!k.includes('@')) it.f[k] = o.fields[k]; }); });
     if (S.cur) S.cur = S.items.find(x => x.id === S.cur.id) || S.cur;
@@ -1808,6 +1887,7 @@ async function boot() {
   try { await initAuth(); } catch (e) { $app.innerHTML = `<div class="login"><h1>Greška pri prijavi</h1><p class="s">${esc(e.message)}</p></div>`; return; }
   if (!S.account) { S.view = 'login'; render(); return; }
   if (!isKom() && S.view === 'danas') { S.view = 'aktivnost'; history.replaceState({ v: 'aktivnost' }, ''); }
+  await syncLoadCache();
   const cached = loadCached();
   if (cached) { S.items = cached; resumeVisit() || render(); }
   await countPending();

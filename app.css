@@ -235,3 +235,9 @@ body.desk .tabs button{max-width:150px}
 .agrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:8px}
 .card.rep{overflow:auto}
 @media (max-width:900px){.wgrid{grid-template-columns:1fr}.wdays{grid-template-columns:1fr}.wside{max-height:none}}
+/* finansije i promet */
+.card.fin{margin:10px 0}.card.fin.bad{border-color:var(--bad);background:var(--bad-soft)}.card.fin.ok{background:var(--ok-soft);border-color:var(--ok)}
+.fgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:6px}.fgrid>div{display:flex;flex-direction:column;min-width:0}.fgrid b{font-size:16px}
+@media (max-width:420px){.fgrid{grid-template-columns:repeat(2,1fr)}}
+.bars{display:flex;align-items:flex-end;gap:3px;height:70px;margin-top:8px}.bars>div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
+.bars i{display:block;width:100%;background:var(--brand);border-radius:3px 3px 0 0;min-height:2px}.bars span{font-size:9px;color:var(--muted);margin-top:2px}
