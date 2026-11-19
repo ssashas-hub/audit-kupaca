@@ -124,6 +124,15 @@ const daysAgo = d => { if (!d) return null; const t = Date.parse(d); return isNa
 const fmtDate = d => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? d : x.toLocaleDateString('sr-RS'); };
 const terenOf = it => cv(it.f.AuditTeren) || 'Bez terena';
 const phoneOf = it => (split(it.f.field_5)[0] || '').replace(/[^\d+]/g, '');
+// potvrda „Da li ste sigurni?” (sopstveni prozor, radi i u aplikaciji na početnom ekranu)
+function askSure(title, body, ok = 'Da, siguran sam') {
+  return new Promise(res => {
+    const m = document.createElement('div'); m.className = 'modal';
+    m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><div class="mb">${body}</div><div class="mbtn"><button class="btn" data-m="0">Odustani</button><button class="btn pri" data-m="1">${esc(ok)}</button></div></div>`;
+    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); m.remove(); res(!!b && b.dataset.m === '1'); });
+    document.body.appendChild(m);
+  });
+}
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2600); }
 
 /* ---------- lokalno skladište ---------- */
@@ -274,10 +283,10 @@ function vKraj() {
   </main><div class="foot"><div class="in"><button class="btn pri" data-a="dayend" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Tražim lokaciju…' : 'Završi radni dan'}</button></div></div>`;
 }
 // za probu: kad GPS ne uspe, nudi se nastavak bez GPS-a (beleži se u dnevnik)
-function gpsFail(msg, what) {
+function gpsFail(msg, what, far) {
   S.gpsErr = msg;
   const el = document.getElementById('err'); if (!el) { toast(msg); return; }
-  el.innerHTML = esc(msg) + (C.allowNoGps ? `<button class="btn" style="width:100%;margin-top:12px" data-a="nogps" data-v="${what}">Nastavi bez GPS-a</button>` : '');
+  el.innerHTML = esc(msg) + (far ? `<button class="btn" style="width:100%;margin-top:12px" data-a="remap">Lokacija je pogrešna, mapiraj ponovo</button>` : '') + (C.allowNoGps ? `<button class="btn" style="width:100%;margin-top:12px" data-a="nogps" data-v="${what}">Nastavi bez GPS-a</button>` : '');
 }
 async function noGps(what) {
   const why = 'BEZ GPS-a: ' + (S.gpsErr || 'preskočeno');
@@ -313,6 +322,17 @@ function beginVisit(it, p) {
   S.visit = { id: it.id, sifra: it.f.Title, n: it.f.field_1 || it.f.Title, start: new Date().toISOString(), audit: false };
   S.day.visits = S.day.visits || []; S.day.visits.push({ id: it.id, n: S.visit.n, s: S.visit.start }); saveDay();
 }
+// mapiranje objekta na licu mesta: provera mesta, precizan GPS, potvrda
+async function mapHere(it, title) {
+  const town = it.f.field_4, tp = await townPos(town), here = await getPos();
+  if (tp && dist(here, tp) > TOWNKM * 1000 + here.acc) throw new Error(`Kupac je u mestu ${town}, a ti si oko ${Math.round(dist(here, tp) / 1000)} km od tog mesta. Lokacija objekta se beleži samo ispred objekta.`);
+  S.townUnchecked = tp === undefined;
+  S.busyMsg = 'Stani ispred ulaza, napolju · tražim signal…'; render();
+  const p = await getPrecise(a => { S.busyMsg = `Stani ispred ulaza, napolju · ±${a} m${a <= MAPACC ? ' ✓' : '…'}`; const b = document.getElementById('busy'); if (b) b.textContent = S.busyMsg; });
+  const ok = await askSure(title, `<p>${esc(it.f.field_1 || it.f.Title)}<br><span class="s">${esc([it.f.field_3, town].filter(Boolean).join(', '))}</span></p><p>Lokacija objekta biće zabeležena na mestu gde stojiš (preciznost ±${p.acc} m). Po njoj se proveravaju sve sledeće posete.</p><p><b>Da li stojiš ispred ulaza ovog objekta?</b></p>`, 'Da, zabeleži');
+  if (!ok) { const e = new Error('Lokacija nije zabeležena.'); e.cancel = true; throw e; }
+  return p;
+}
 async function visitStart() {
   const it = S.cur;
   if (S.visit) { toast('Već je u toku poseta kod: ' + S.visit.n); return; }
@@ -324,14 +344,10 @@ async function visitStart() {
       p = await getPos();
       if (p.acc > MAXACC) throw new Error(`GPS je neprecizan (±${p.acc} m). Sačekaj malo ili izađi napolje, pa pokušaj ponovo.`);
       d = dist(p, home);
-      if (d > RADIUS + p.acc + home.acc) throw new Error(`Nisi na lokaciji kupca: udaljen si oko ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m'}. Poseta može da počne samo kod objekta.`);
+      if (d > RADIUS + p.acc + home.acc) { const e = new Error(`Nisi na lokaciji kupca: udaljen si oko ${d >= 1000 ? (d / 1000).toFixed(1) + ' km' : d + ' m'}. Poseta može da počne samo kod objekta.`); e.far = true; throw e; }
       if (home.acc > MAPACC && p.acc <= MAPACC) mapped = true; // stara, slabija tačka – zameni boljom
     } else {
-      const town = it.f.field_4, tp = await townPos(town), here = await getPos();
-      if (tp && dist(here, tp) > TOWNKM * 1000 + here.acc) throw new Error(`Kupac je u mestu ${town}, a ti si oko ${Math.round(dist(here, tp) / 1000)} km od tog mesta. Lokacija objekta se beleži samo ispred objekta.`);
-      if (tp === undefined) S.townUnchecked = true;
-      S.busyMsg = 'Stani ispred ulaza, napolju · tražim signal…'; render();
-      p = await getPrecise(a => { S.busyMsg = `Stani ispred ulaza, napolju · ±${a} m${a <= MAPACC ? ' ✓' : '…'}`; const b = document.getElementById('busy'); if (b) b.textContent = S.busyMsg; });
+      p = await mapHere(it, 'Zabeleži lokaciju objekta');
       mapped = true;
     }
     if (mapped) {
@@ -342,7 +358,24 @@ async function visitStart() {
     beginVisit(it, p);
     await logEvent('POČETAK POSETE', p, it, Object.assign(d !== null ? { Udaljenost: d } : {}, mapped ? { Napomena: home ? 'lokacija objekta preciznije zabeležena' : 'prva poseta: lokacija objekta zabeležena' + (S.townUnchecked ? ' (mesto nije provereno – nema mreže)' : '') } : {})); S.townUnchecked = false;
     S.busy = false; render(); toast(home ? 'Poseta je počela.' : 'Poseta je počela. Lokacija objekta je zabeležena.');
-  } catch (e) { S.busy = false; S.busyMsg = ''; render(); gpsFail(e.message, 'visit'); }
+  } catch (e) { S.busy = false; S.busyMsg = ''; render(); if (e.cancel) toast(e.message); else gpsFail(e.message, 'visit', e.far); }
+}
+// ispravka pogrešne lokacije: komercijalista sam, uz trag u dnevniku
+async function remap() {
+  const it = S.cur; if (S.visit) return;
+  const old = parseLoc(it.f.Lokacija);
+  if (!await askSure('Ispravka lokacije', `<p>Zabeležena lokacija objekta <b>${esc(it.f.field_1 || it.f.Title)}</b> biće zamenjena novom, na mestu gde stojiš.</p><p>Ispravka se beleži u dnevnik rada, sa starom i novom tačkom.</p>`, 'Da, ispravi')) return;
+  S.busy = true; render();
+  try {
+    const p = await mapHere(it, 'Potvrdi novu lokaciju');
+    const moved = old ? dist(p, old) : null;
+    it.f.Lokacija = fmtLoc(p); saveItems();
+    await queue({ type: 'patch', itemId: it.id, fields: { Lokacija: it.f.Lokacija } });
+    await logEvent('ISPRAVKA LOKACIJE', p, it, { Udaljenost: moved, Napomena: `stara: ${old ? fmtLoc(old) : '—'}; nova: ${it.f.Lokacija}${moved !== null ? '; pomereno ' + moved + ' m' : ''}${S.townUnchecked ? ' (mesto nije provereno – nema mreže)' : ''}` });
+    S.busyMsg = ''; beginVisit(it, p);
+    await logEvent('POČETAK POSETE', p, it, { Udaljenost: 0, Napomena: 'posle ispravke lokacije' });
+    S.busy = false; render(); toast('Lokacija je ispravljena. Poseta je počela.');
+  } catch (e) { S.busy = false; S.busyMsg = ''; render(); if (e.cancel) toast(e.message); else gpsFail(e.message, 'visit'); }
 }
 const VISH = ['obavljen razgovor', 'urađen audit', 'primljena porudžbina', 'kupac nije bio tu', 'objekat zatvoren', 'ostalo'];
 function vKrajPosete() {
@@ -542,6 +575,10 @@ async function finishAudit() {
   const d = S.d;
   if (!d.AuditIshod) { document.getElementById('err').textContent = 'Izaberi ishod obilaska.'; return; }
   const f = S.cur.f, stamp = new Date().toLocaleString('sr-RS');
+  const KEY = [['StatusNovi', 'Status'], ['AuditSegment', 'Segment'], ['AuditTeren', 'Teren'], ['AuditNacinPlacanja', 'Način plaćanja'], ['AuditPlanObilaska', 'Plan obilaska'], ['AuditNacinRazvoza', 'Način razvoza'], ['AuditNacinPozivanja', 'Način pozivanja']];
+  const ch = KEY.filter(([k]) => cv(f[k]) && d[k] && cv(f[k]) !== d[k]);
+  const closing = ['zatvoren', 'neaktivan'].includes(d.StatusNovi) && cv(f.StatusNovi) !== d.StatusNovi;
+  if ((ch.length || closing) && !await askSure('Menjaš važne podatke', `<p>Kod kupca <b>${esc(f.field_1 || f.Title)}</b> menjaš:</p><ul>${ch.map(([k, n]) => `<li><b>${n}:</b> ${esc(cv(f[k]))} → <b>${esc(d[k])}</b></li>`).join('')}${closing && !ch.some(([k]) => k === 'StatusNovi') ? `<li><b>Status:</b> → <b>${esc(d.StatusNovi)}</b></li>` : ''}</ul><p>Da li su izmene tačne?</p>`, 'Da, sačuvaj')) return;
   const note = d.Beleske.trim() ? `[${stamp} · ${d.AuditIshod}] ${d.Beleske.trim()}` : `[${stamp} · ${d.AuditIshod}]`;
   const fields = {};
   ['StatusNovi', 'AuditSegment', 'AuditTeren', 'AuditNacinRazvoza', 'AuditNacinPozivanja', 'AuditNacinPlacanja', 'Velicina', 'Potencijal', 'AuditPlanObilaska', 'AuditIshod'].forEach(k => { if (d[k]) fields[k] = d[k]; });
@@ -584,6 +621,7 @@ async function saveNovi(skipGps) {
   btn.disabled = true; btn.textContent = 'Stani ispred ulaza, napolju · tražim signal…'; er.textContent = '';
   try { p = await getPrecise(a => { btn.textContent = `Stani ispred ulaza, napolju · ±${a} m${a <= MAPACC ? ' ✓' : '…'}`; }); }
   catch (e) { btn.disabled = false; btn.textContent = 'Upiši i pokreni audit'; gpsFail(e.message, 'novi'); return; }
+  if (!await askSure('Zabeleži lokaciju objekta', `<p>${esc(fields.field_1)}<br><span class="s">${esc([fields.field_3, fields.field_4].filter(Boolean).join(', '))}</span></p><p>Lokacija novog objekta biće zabeležena na mestu gde stojiš (preciznost ±${p.acc} m).</p><p><b>Da li stojiš ispred ulaza ovog objekta?</b></p>`, 'Da, zabeleži')) { btn.disabled = false; btn.textContent = 'Upiši i pokreni audit'; return; }
   fields.Lokacija = fmtLoc(p);
   }
   const it = { id: 'tmp' + now.getTime(), f: { ...fields } };
@@ -627,6 +665,7 @@ document.addEventListener('click', async e => {
     case 'govisit': S.cur = S.items.find(x => x.id === S.visit.id) || S.cur; go('kartica'); break;
     case 'endvisit': S.vk = null; go('krajposete'); break;
     case 'nogps': await noGps(v); break;
+    case 'remap': await remap(); break;
     case 'startnew': startAudit(true); break;
     case 'vish': S.vk.b = document.getElementById('vkb').value; S.vk.i = S.vk.i === v ? '' : v; rerender(); break;
     case 'endvisitsave': await visitEnd(); break;
