@@ -45,7 +45,7 @@ const STEPS = [
 /* ---------- stanje ---------- */
 const S = {
   items: [], site: null, list: null, account: null, pca: null,
-  view: 'tereni', teren: null, filter: 'open', sort: 'promet', q: '',
+  view: 'danas', teren: null, from: 'danas', ktab: 'pregled', log: [], lastV: {}, pravac: null, showAll: false, nk: null, noteNew: false, filter: 'open', sort: 'promet', q: '',
   cur: null, step: 0, d: null, photos: [], online: navigator.onLine, pending: 0, syncing: false,
   logList: null, day: null, visit: null, busy: false
 };
@@ -107,6 +107,7 @@ async function logEvent(type, pos, it, extra = {}) {
   if (pos) { f.Lat = pos.lat; f.Lon = pos.lon; f.Tacnost = pos.acc; }
   if (it) { f.KupacSifra = String(it.f.Title || ''); f.KupacNaziv = String(it.f.field_1 || ''); f.KupacId = String(it.id); }
   Object.assign(f, extra);
+  S.log.push({ t: f.Title, v: f.Vreme, s: f.KupacSifra || '', n: f.KupacNaziv || '', k: f.Korisnik, u: f.Udaljenost, m: f.Napomena || '' }); saveLog(); buildLogIndex();
   await queue({ type: 'log', fields: f });
 }
 if (DEMO) window.__t = { S, get DB() { return DB; } };
@@ -123,6 +124,48 @@ const today = () => new Date().toISOString().slice(0, 10);
 const daysAgo = d => { if (!d) return null; const t = Date.parse(d); return isNaN(t) ? null : Math.floor((Date.now() - t) / 864e5); };
 const fmtDate = d => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? d : x.toLocaleDateString('sr-RS'); };
 const terenOf = it => cv(it.f.AuditTeren) || 'Bez terena';
+/* ---------- plan obilaska ---------- */
+const OBIL_DAYS = { '801': 7, '802': 14, '803': 30, '804': 91, '805': 182, '806': 365, '809': 0 };
+const FAR_TER = ['2.01', '2.02', '2.03']; // daleki tereni (Negotin, Zaječar, Bor): najviše kvartalno
+const klasaOf = it => { const k = String(it.f.field_13 || it.f.field_12 || '').trim().toUpperCase(); return /^[A-E]/.test(k) ? k[0] : ''; };
+function planOf(it) {
+  const a = cv(it.f.AuditPlanObilaska);
+  if (a) { const c = String(a).slice(0, 3); return { code: c, days: OBIL_DAYS[c] ?? 0, label: String(a).slice(4).toLowerCase(), set: true }; }
+  const t = terenOf(it);
+  if (/BEOGRAD|NOVI SAD/.test(t)) return { code: '809', days: 0, label: 'ne obilazi se (predlog)', set: false };
+  let c = { A: '802', B: '803', C: '804', D: '805', E: '806' }[klasaOf(it)] || '804';
+  if (FAR_TER.some(p => t.startsWith(p)) && OBIL_DAYS[c] < 91) c = '804';
+  return { code: c, days: OBIL_DAYS[c], label: OBIL.find(o => o.startsWith(c)).slice(4).toLowerCase() + ' (predlog)', set: false };
+}
+function lastVisit(it) { const a = S.lastV[String(it.f.Title)] || 0, b = it.f.DatumObilaska ? Date.parse(it.f.DatumObilaska) || 0 : 0; return Math.max(a, b) || null; }
+// null = ne ide na plan; over = dana kašnjenja (negativno = za toliko dana dolazi na red)
+function dueOf(it) {
+  if (cv(it.f.StatusNovi) === 'zatvoren') return null;
+  const p = planOf(it), ob = !!it.f.Obici;
+  if (!p.days && !ob) return null;
+  const lv = lastVisit(it);
+  if (ob) return { top: true, ob, lv, p, over: lv ? Math.floor((Date.now() - lv) / 864e5) : null };
+  if (!lv) return { top: true, never: true, p, over: null };
+  return { top: false, lv, p, over: Math.floor((Date.now() - lv - p.days * 864e5) / 864e5) };
+}
+const LS_LOG = 'ak_log_v1', LS_PRAVAC = 'ak_pravac_v1';
+try { S.log = JSON.parse(localStorage.getItem(LS_LOG) || '[]'); } catch (e) { S.log = []; }
+try { const pv = JSON.parse(localStorage.getItem(LS_PRAVAC) || 'null'); S.pravac = pv && pv.date === new Date().toLocaleDateString('sr-RS') ? pv : null; } catch (e) { }
+function saveLog() { try { localStorage.setItem(LS_LOG, JSON.stringify(S.log.slice(-5000))); } catch (e) { } }
+function buildLogIndex() {
+  S.lastV = {};
+  S.log.forEach(e => { if (e.s && /POSETE/.test(e.t)) { const t = Date.parse(e.v) || 0; if (t > (S.lastV[e.s] || 0)) S.lastV[e.s] = t; } });
+}
+buildLogIndex();
+async function fetchLog() {
+  if (!S.logList) return;
+  let url = '/sites/' + S.site + '/lists/' + S.logList + '/items?$expand=fields($select=Title,Vreme,KupacSifra,KupacNaziv,Korisnik,Udaljenost,Napomena)&$top=999';
+  const out = [];
+  while (url) { const j = await g(url); j.value.forEach(x => { const f = x.fields; out.push({ t: f.Title, v: f.Vreme, s: f.KupacSifra || '', n: f.KupacNaziv || '', k: f.Korisnik || '', u: f.Udaljenost, m: f.Napomena || '' }); }); url = j['@odata.nextLink']; }
+  const pend = (await DB.all()).filter(o => o.type === 'log').map(o => { const f = o.fields; return { t: f.Title, v: f.Vreme, s: f.KupacSifra || '', n: f.KupacNaziv || '', k: f.Korisnik || '', u: f.Udaljenost, m: f.Napomena || '' }; });
+  S.log = out.concat(pend).sort((a, b) => String(a.v).localeCompare(String(b.v)));
+  saveLog(); buildLogIndex();
+}
 const phoneOf = it => (split(it.f.field_5)[0] || '').replace(/[^\d+]/g, '');
 // potvrda „Da li ste sigurni?” (sopstveni prozor, radi i u aplikaciji na početnom ekranu)
 function askSure(title, body, ok = 'Da, siguran sam') {
@@ -130,6 +173,14 @@ function askSure(title, body, ok = 'Da, siguran sam') {
     const m = document.createElement('div'); m.className = 'modal';
     m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><div class="mb">${body}</div><div class="mbtn"><button class="btn" data-m="0">Odustani</button><button class="btn pri" data-m="1">${esc(ok)}</button></div></div>`;
     m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); m.remove(); res(!!b && b.dataset.m === '1'); });
+    document.body.appendChild(m);
+  });
+}
+function askChoice(title, opts) {
+  return new Promise(res => {
+    const m = document.createElement('div'); m.className = 'modal';
+    m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><div class="opts">${opts.map(([k, t, d]) => `<button class="opt" data-m="${k}"><span><b>${esc(t)}</b><br><span class="s">${esc(d)}</span></span></button>`).join('')}</div><div class="mbtn"><button class="btn" data-m="">Odustani</button></div></div>`;
+    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); m.remove(); res(b ? b.dataset.m : ''); });
     document.body.appendChild(m);
   });
 }
@@ -218,6 +269,9 @@ async function flush() {
         const it = S.items.find(x => x.id === op.tmp); if (it) it.id = r.id;
         for (const o of await DB.all()) if (o.itemId === op.tmp) { o.itemId = r.id; await DB.put(o); }
         if (S.cur && S.cur.id === op.tmp) S.cur.id = r.id;
+        if (S.visit && S.visit.id === op.tmp) S.visit.id = r.id;
+        if (S.day && S.day.visits) S.day.visits.forEach(v => { if (v.id === op.tmp) v.id = r.id; });
+        saveDay();
         saveItems();
       } else if (op.type === 'log') {
         if (!S.logList) throw new Error('Nema liste Dnevnik rada');
@@ -245,7 +299,7 @@ addEventListener('offline', () => { S.online = false; paintSync(); });
 /* ---------- navigacija ---------- */
 function go(view, push = true) { S.view = view; if (push) history.pushState({ v: view }, ''); render(); scrollTo(0, 0); }
 addEventListener('popstate', () => {
-  const back = { kupci: 'tereni', kartica: 'kupci', audit: 'kartica', kraj: 'tereni', krajposete: 'kartica', novi: S.teren !== null ? 'kupci' : 'tereni' }[S.view];
+  const back = { kupci: 'tereni', kartica: S.from === 'kupci' && S.teren === null ? 'tereni' : (S.from || 'danas'), audit: 'kartica', kraj: 'vise', krajposete: 'kartica', novi: S.from || 'danas', beleska: S.noteNew ? (S.from || 'danas') : 'kartica' }[S.view];
   if (back) go(back, false);
 });
 
@@ -256,9 +310,10 @@ function bar(title, back) {
 function saveDraft() { if (S.visit && S.d && S.view === 'audit' && S.cur && S.cur.id === S.visit.id) { S.visit.draft = { d: S.d, step: S.step }; saveDay(); } }
 function render() {
   saveDraft();
-  let v = { tereni: vTereni, kupci: vKupci, kartica: vKartica, audit: vAudit, novi: vNovi, login: vLogin, kraj: vKraj, krajposete: vKrajPosete }[S.view] || vTereni;
+  let v = { danas: vDanas, vise: vVise, beleska: vBeleska, tereni: vTereni, kupci: vKupci, kartica: vKartica, audit: vAudit, novi: vNovi, login: vLogin, kraj: vKraj, krajposete: vKrajPosete }[S.view] || vTereni;
   if (S.view !== 'login' && !dayOn() && !S.visit) v = vDan;
   $app.innerHTML = (DEMO ? '<div class="demo">Probni režim – izmišljeni kupci, ništa se ne šalje</div>' : '') + v();
+  document.body.classList.toggle('tabs-on', !!document.querySelector('.tabs'));
   paintSync();
   const sIn = document.getElementById('q'); if (sIn && S.focusQ) { sIn.focus(); sIn.setSelectionRange(sIn.value.length, sIn.value.length); S.focusQ = false; }
 }
@@ -293,7 +348,7 @@ async function noGps(what) {
   if (what === 'day') {
     S.day = { date: new Date().toLocaleDateString('sr-RS'), start: new Date().toISOString(), visits: [], noGps: true };
     saveDay(); await logEvent('POČETAK DANA', null, null, { Napomena: why });
-    S.view = 'tereni'; render(); toast('Radni dan je počeo bez GPS-a.');
+    S.view = 'danas'; render(); toast('Radni dan je počeo bez GPS-a.');
   } else if (what === 'visit') {
     if (S.visit) return;
     beginVisit(S.cur); S.visit.noGps = true; saveDay();
@@ -307,7 +362,7 @@ async function dayStart() {
     const p = await getPos();
     S.day = { date: new Date().toLocaleDateString('sr-RS'), start: new Date().toISOString(), visits: [] };
     saveDay(); await logEvent('POČETAK DANA', p, null);
-    S.busy = false; S.view = 'tereni'; render(); toast('Radni dan je počeo u ' + hhmm(S.day.start) + '.');
+    S.busy = false; S.view = 'danas'; render(); toast('Radni dan je počeo u ' + hhmm(S.day.start) + '.');
   } catch (e) { S.busy = false; render(); gpsFail(e.message, 'day'); }
 }
 async function dayEnd() {
@@ -316,7 +371,7 @@ async function dayEnd() {
   let p = null; try { p = await getPos(); } catch (e) { }
   S.day.end = new Date().toISOString(); saveDay();
   await logEvent('KRAJ DANA', p, null, p ? {} : { Napomena: 'lokacija nije dostupna' });
-  S.busy = false; S.view = 'tereni'; render();
+  S.busy = false; S.view = 'danas'; render();
 }
 function beginVisit(it, p) {
   S.visit = { id: it.id, sifra: it.f.Title, n: it.f.field_1 || it.f.Title, start: new Date().toISOString(), audit: false };
@@ -402,9 +457,126 @@ async function visitEnd() {
     it.f.Beleske = it.f.Beleske ? note + '\n' + it.f.Beleske : note; saveItems();
     await queue({ type: 'patch', itemId: it.id, fields: { Beleske: it.f.Beleske } });
   }
+  if (it && it.f.Obici) { it.f.Obici = false; saveItems(); await queue({ type: 'patch', itemId: it.id, fields: { Obici: false } }); }
   const v = (S.day.visits || []).slice().reverse().find(x => x.id === S.visit.id && !x.e); if (v) { v.e = new Date().toISOString(); v.i = k.i; }
   S.visit = null; S.vk = null; S.busy = false; saveDay();
   toast('Poseta je završena.'); history.back();
+}
+function tabs(on) {
+  return `<nav class="tabs">${[['danas', '☀', 'Danas'], ['tereni', '☰', 'Kupci'], ['vise', '⋯', 'Više']].map(([k, i, n]) => `<button class="${on === k ? 'on' : ''}" data-a="tab" data-v="${k}"><span>${i}</span>${n}</button>`).join('')}</nav>`;
+}
+function dayStats() {
+  const vs = (S.day && S.day.visits) || [], done = vs.filter(v => v.e);
+  const avg = done.length ? Math.max(1, Math.round(done.reduce((a, v) => a + (Date.parse(v.e) - Date.parse(v.s)) / 60000, 0) / done.length)) : 0;
+  return { n: vs.length, avg, a: (S.day && S.day.audits) || 0, b: (S.day && S.day.notes) || 0 };
+}
+function planRows() {
+  const sel = (S.pravac && S.pravac.t) || [], out = [];
+  S.items.forEach(it => { if (!sel.includes(terenOf(it))) return; const d = dueOf(it); if (!d) return; if (d.top || d.over >= -7) out.push({ it, d }); });
+  const kl = it => 'ABCDE'.indexOf(klasaOf(it)) < 0 ? 9 : 'ABCDE'.indexOf(klasaOf(it));
+  out.sort((x, y) => (x.d.top === y.d.top ? 0 : x.d.top ? -1 : 1) || (x.d.top ? 0 : y.d.over - x.d.over) || kl(x.it) - kl(y.it) || num(y.it.f.field_19) + num(y.it.f.field_18) / 2 - num(x.it.f.field_19) - num(x.it.f.field_18) / 2);
+  return out;
+}
+function rowPlan({ it, d }) {
+  const f = it.f, k = klasaOf(it);
+  const when = d.ob ? (d.lv ? 'označen „obići” · poslednja poseta ' + fmtDate(d.lv) : 'označen „obići” · još nije obiđen') : d.never ? 'nikad obiđen' : `poslednja poseta ${fmtDate(d.lv)} · ` + (d.over > 0 ? `<b class="late">kasni ${d.over} d</b>` : d.over === 0 ? '<b class="late">danas na redu</b>' : `na redu za ${-d.over} d`);
+  const badges = (d.ob ? '<span class="badge warn">obići</span> ' : '') + (cv(f.StatusNovi) === 'potencijalni' ? '<span class="badge brand">potencijalni</span> ' : '') + (S.visit && S.visit.id === it.id ? '<span class="badge ok">poseta u toku</span>' : '');
+  return `<div class="row" data-a="kupac" data-v="${esc(it.id)}"><div class="grow"><div class="t ell">${esc(f.field_1 || f.Title)}</div><div class="s ell">${esc([f.field_3, f.field_4].filter(Boolean).join(', ') || '—')}</div><div class="s">${when}</div>${badges ? `<div>${badges}</div>` : ''}</div><div class="right">${k ? `<div class="kl">${k}</div>` : ''}<div class="s">${money(f.field_19)}</div></div></div>`;
+}
+function vDanas() {
+  const st = dayStats(), sel = (S.pravac && S.pravac.t) || [];
+  const cnt = {}; S.items.forEach(it => { const d = dueOf(it); if (d && (d.top || d.over >= -7)) cnt[terenOf(it)] = (cnt[terenOf(it)] || 0) + 1; });
+  const ters = [...new Set(S.items.map(terenOf))].sort((a, b) => a === 'Bez terena' ? 1 : b === 'Bez terena' ? -1 : a.localeCompare(b, 'sr', { numeric: true }));
+  const rows = sel.length ? planRows() : [], lim = S.showAll ? rows.length : 40;
+  return bar('Danas') + `<main class="main">
+    ${visitBanner()}
+    <div class="sum4"><div class="kpi"><span class="s">Posete</span><b>${st.n}</b></div><div class="kpi"><span class="s">Prosečno</span><b>${st.avg ? st.avg + ' min' : '—'}</b></div><div class="kpi"><span class="s">Auditi</span><b>${st.a}</b></div><div class="kpi"><span class="s">Beleške</span><b>${st.b}</b></div></div>
+    <div class="s" style="margin:-4px 2px 12px">${S.day ? 'Radni dan od ' + hhmm(S.day.start) + (S.day.noGps ? ' (bez GPS-a)' : '') : ''}</div>
+    <h2>Pravac za danas</h2>
+    <div class="chips">${ters.map(t => `<button class="${sel.includes(t) ? 'on' : ''}" data-a="pravac" data-v="${esc(t)}">${esc(t)}${cnt[t] ? ` <i>${cnt[t]}</i>` : ''}</button>`).join('')}</div>
+    ${!sel.length ? '<div class="empty">Izaberi jedan ili više terena kojima ideš danas. Broj pored terena pokazuje koliko je kupaca na redu.</div>'
+      : `<h2>Na redu · ${rows.length}</h2>${rows.slice(0, lim).map(rowPlan).join('') || '<div class="empty">Na izabranim terenima niko nije na redu za obilazak.</div>'}${rows.length > lim ? `<button class="btn" style="width:100%" data-a="showall">Prikaži sve (${rows.length})</button>` : ''}`}
+  </main><button class="fab" data-a="novi">＋ Nov kupac</button>` + tabs('danas');
+}
+function vVise() {
+  return bar('Više') + `<main class="main">
+    <div class="card"><dl class="kv"><dt>Prijavljen</dt><dd>${esc(userName() || '—')}</dd><dt>Kupaca u telefonu</dt><dd>${S.items.length}</dd><dt>Čeka na slanje</dt><dd>${S.pending}${S.pending && !navigator.onLine ? ' (nema mreže)' : ''}</dd><dt>Radni dan</dt><dd>${S.day ? 'od ' + hhmm(S.day.start) + (S.day.end ? ' do ' + hhmm(S.day.end) : '') : '—'}</dd></dl></div>
+    <button class="btn" style="width:100%;margin-top:12px" data-a="refresh">⟳ Osveži podatke</button>
+    <button class="btn" style="width:100%;margin-top:10px" data-a="kraj">Kraj radnog dana</button>
+    <button class="btn" style="width:100%;margin-top:10px" data-a="logout">Odjava</button>
+    <p class="s" style="text-align:center;margin-top:18px">Audit kupaca · verzija 19.11.2026</p>
+  </main>` + tabs('vise');
+}
+function vBeleska() {
+  const nw = S.noteNew, it = nw ? null : S.cur, k = S.nk;
+  const fld = (id, l, t = 'text', ph = '') => `<div class="fld"><label>${l}</label><input data-i="${id}" type="${t}" placeholder="${esc(ph)}" value="${esc(k[id] || '')}"></div>`;
+  return bar(nw ? 'Brza beleška · nov objekat' : 'Brza beleška', true) + `<main class="main">
+    ${it ? `<div class="t">${esc(it.f.field_1 || it.f.Title)}</div><div class="s" style="margin-bottom:12px">${esc([it.f.field_3, it.f.field_4].filter(Boolean).join(', '))}</div>` : '<p class="s">Objekat koji si video u prolazu. Upisuje se kao potencijalni kupac, a poseta i lična karta se rade kasnije.</p>'}
+    ${nw ? fld('nk_naziv', 'Naziv objekta', 'text', 'ako ne znaš, ostavi prazno') + fld('nk_adresa', 'Adresa') + fld('nk_mesto', 'Mesto') + fld('nk_tel', 'Telefon', 'tel') : ''}
+    <div class="fld"><label>Napomena</label><textarea data-i="nk_text" placeholder="Šta si video, zašto vredi doći, kada je otvoreno…">${esc(k.nk_text || '')}</textarea></div>
+    <label class="big-act"><span>📷</span>Slikaj<input type="file" accept="image/*" capture="environment" data-i="nphoto" hidden></label>
+    <div class="thumbs">${k.photos.map(p => `<img src="${p.url}" alt="">`).join('')}</div>
+    <button class="opt ${k.obici ? 'on' : ''}" style="width:100%" data-a="nkobici">${k.obici ? '☑' : '☐'} Obići sledeći put (stavlja ga u plan dana)</button>
+    <p class="s">Lokacija se beleži okvirno, u trenutku čuvanja. Tačna lokacija objekta se beleži pri prvoj poseti.</p>
+    <div class="err" id="err"></div>
+  </main><div class="foot"><div class="in"><button class="btn pri" data-a="notesave" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Čuvam…' : 'Sačuvaj belešku'}</button></div></div>`;
+}
+function openNote(nw) {
+  S.noteNew = nw; S.from = nw ? S.view : S.from;
+  S.nk = { obici: nw ? true : !!(S.cur && S.cur.f.Obici), photos: [] };
+  go('beleska');
+}
+async function saveNote() {
+  const nw = S.noteNew, k = S.nk, text = String(k.nk_text || '').trim(), er = document.getElementById('err');
+  if (nw && !k.nk_naziv && !text && !k.photos.length) { er.textContent = 'Upiši naziv, napomenu ili dodaj sliku.'; return; }
+  if (!nw && !text && !k.photos.length && k.obici === !!S.cur.f.Obici) { er.textContent = 'Upiši napomenu ili dodaj sliku.'; return; }
+  S.busy = true; render();
+  let p = null; try { p = await getPos(); } catch (e) { }
+  const now = new Date(), stamp = now.toLocaleString('sr-RS'), line = `[${stamp} · beleška] ${text}`.trim();
+  let it;
+  if (nw) {
+    const code = 'NOVO-' + now.toISOString().slice(2, 16).replace(/\D/g, '');
+    const fields = { Title: code, field_1: k.nk_naziv || 'Nepoznat objekat', field_3: k.nk_adresa || '', field_4: k.nk_mesto || '', field_5: k.nk_tel || '', StatusNovi: 'potencijalni', Obici: !!k.obici, Beleske: line };
+    if (p && p.acc <= MAXACC) fields.Lokacija = fmtLoc(p);
+    const sel = (S.pravac && S.pravac.t) || [];
+    if (sel.length === 1 && sel[0] !== 'Bez terena') fields.AuditTeren = sel[0]; else if (S.teren && S.teren !== '*' && S.teren !== 'Bez terena') fields.AuditTeren = S.teren;
+    it = { id: 'tmp' + now.getTime(), f: { ...fields } };
+    S.items.push(it); saveItems();
+    await queue({ type: 'create', tmp: it.id, fields });
+  } else {
+    it = S.cur; const fields = {};
+    if (text) { it.f.Beleske = it.f.Beleske ? line + '\n' + it.f.Beleske : line; fields.Beleske = it.f.Beleske; }
+    if (k.obici !== !!it.f.Obici) { it.f.Obici = !!k.obici; fields.Obici = !!k.obici; }
+    saveItems();
+    if (Object.keys(fields).length) await queue({ type: 'patch', itemId: it.id, fields });
+  }
+  const ps = now.toISOString().slice(0, 16).replace(/\D/g, '');
+  for (let i = 0; i < k.photos.length; i++) await queue({ type: 'photo', name: `${it.f.Title}-${ps}-b${i + 1}.jpg`, blob: k.photos[i].blob });
+  k.photos.forEach(x => URL.revokeObjectURL(x.url));
+  await logEvent('BELEŠKA', p, it, { Napomena: (nw ? 'nov objekat: ' : '') + (text || '(bez teksta)') + (k.photos.length ? ` · slika: ${k.photos.length}` : '') + (k.obici ? ' · obići' : '') + (p ? '' : ' [bez lokacije]') });
+  if (S.day) { S.day.notes = (S.day.notes || 0) + 1; saveDay(); }
+  S.busy = false; S.nk = null; S.cur = it; S.ktab = 'posete';
+  S.view = 'kartica'; history.replaceState({ v: 'kartica' }, ''); render(); scrollTo(0, 0);
+  toast('Beleška je sačuvana.');
+}
+function visitHistory(it) {
+  const code = String(it.f.Title), ev = S.log.filter(e => e.s === code).sort((a, b) => String(a.v).localeCompare(String(b.v)));
+  const out = []; const open = {};
+  ev.forEach(e => {
+    if (e.t === 'POČETAK POSETE') { const r = { kind: 'visit', s: e.v, k: e.k, m: e.m && /BEZ GPS/.test(e.m) ? 'bez GPS-a' : '' }; out.push(r); open[e.k] = r; }
+    else if (e.t === 'KRAJ POSETE') { const r = open[e.k]; if (r) { r.e = e.v; r.res = e.m; delete open[e.k]; } else out.push({ kind: 'visit', e: e.v, k: e.k, res: e.m }); }
+    else if (e.t === 'AUDIT') { const r = open[e.k]; if (r) r.audit = e.m; else out.push({ kind: 'other', t: 'Audit', v: e.v, k: e.k, m: e.m }); }
+    else out.push({ kind: 'other', t: e.t === 'BELEŠKA' ? 'Beleška' : e.t === 'ISPRAVKA LOKACIJE' ? 'Ispravka lokacije' : e.t, v: e.v, k: e.k, m: e.m });
+  });
+  return out.reverse();
+}
+function vPosete(it) {
+  const h = visitHistory(it), who = k => esc(String(k || '').split('@')[0]);
+  const old = it.f.DatumObilaska && !h.some(r => r.kind === 'visit') ? `<div class="hrow"><div class="t">Obilazak ${fmtDate(it.f.DatumObilaska)}</div><div class="s">${esc(cv(it.f.AuditIshod) || '')}</div></div>` : '';
+  if (!h.length && !old) return '<div class="empty">Nema zabeleženih poseta ni beleški.</div>';
+  return h.map(r => r.kind === 'visit'
+    ? `<div class="hrow"><div class="t">Poseta ${fmtDate(r.s || r.e)} · ${r.s ? hhmm(r.s) : '?'}–${r.e ? hhmm(r.e) : 'u toku'}${r.s && r.e ? ' · ' + Math.max(1, Math.round((Date.parse(r.e) - Date.parse(r.s)) / 60000)) + ' min' : ''}</div><div class="s">${who(r.k)}${r.audit ? ' · audit: ' + esc(r.audit) : ''}${r.m ? ' · ' + r.m : ''}</div>${r.res ? `<div class="s2">${esc(r.res)}</div>` : ''}</div>`
+    : `<div class="hrow"><div class="t">${esc(r.t)} · ${fmtDate(r.v)} ${r.v ? hhmm(r.v) : ''}</div><div class="s">${who(r.k)}</div>${r.m ? `<div class="s2">${esc(r.m)}</div>` : ''}</div>`).join('') + old;
 }
 function stats(list) { const tot = list.length, done = list.filter(x => x.f.Obradjeno).length; return { tot, done, pct: tot ? Math.round(done / tot * 100) : 0, prom: list.reduce((a, x) => a + num(x.f.field_19), 0) }; }
 function vTereni() {
@@ -413,13 +585,12 @@ function vTereni() {
   const keys = Object.keys(groups).sort((a, b) => a === 'Bez terena' ? -1 : b === 'Bez terena' ? 1 : stats(groups[b]).prom - stats(groups[a]).prom);
   const all = stats(S.items);
   const td = S.items.filter(x => (x.f.DatumObilaska || '').slice(0, 10) === today()).length;
-  return bar('Tereni') + `<main class="main">
+  return bar('Kupci') + `<main class="main">
     ${visitBanner()}
     <div class="sum"><div class="kpi"><span class="s">Obrađeno</span><b>${all.done} / ${all.tot}</b></div><div class="kpi"><span class="s">Danas</span><b>${td}</b></div></div>
     <div class="row" data-a="teren" data-v="*"><div class="grow"><div class="t">Svi kupci</div><div class="s">${all.tot} kupaca · promet 2026: ${money(all.prom)}</div><div class="prog"><i style="width:${all.pct}%"></i></div></div><div class="right s">${all.pct}%</div></div>
     ${keys.map(k => { const s = stats(groups[k]); return `<div class="row" data-a="teren" data-v="${esc(k)}"><div class="grow"><div class="t">${esc(k)}${k === 'Bez terena' ? ' <span class="badge warn">dodeliti</span>' : ''}</div><div class="s">${s.tot} kupaca · obrađeno ${s.done} · ${money(s.prom)}</div><div class="prog"><i style="width:${s.pct}%"></i></div></div><div class="right s">${s.done}/${s.tot}</div></div>`; }).join('')}
-    <button class="btn" style="width:100%;margin-top:18px" data-a="kraj">Kraj radnog dana${S.day ? ' · počeo u ' + hhmm(S.day.start) : ''}</button>
-  </main><button class="fab" data-a="novi">＋ Nov kupac</button>`;
+  </main><button class="fab" data-a="novi">＋ Nov kupac</button>` + tabs('tereni');
 }
 function inTeren() { return S.items.filter(it => S.teren === '*' || terenOf(it) === S.teren); }
 function visitBanner() {
@@ -434,7 +605,7 @@ function vKupci() {
     <div class="seg">${[['open', 'Neobrađeni'], ['back', 'Vratiti se'], ['done', 'Obrađeni'], ['all', 'Svi']].map(([k, n]) => `<button class="${S.filter === k ? 'on' : ''}" data-a="filter" data-v="${k}">${n} ${cnt[k]}</button>`).join('')}</div>
     <div class="sorts">Redosled: ${[['promet', 'promet'], ['mesto', 'mesto i adresa'], ['naziv', 'naziv']].map(([k, n]) => `<button class="${S.sort === k ? 'on' : ''}" data-a="sort" data-v="${k}">${n}</button>`).join('')}</div>
     <div id="list">${html}</div>
-  </main><button class="fab" data-a="novi">＋ Nov kupac</button>`;
+  </main><button class="fab" data-a="novi">＋ Nov kupac</button>` + tabs('tereni');
 }
 function kupciList() {
   const base = inTeren();
@@ -479,6 +650,9 @@ function vKartica() {
       <div class="kpi"><span class="s">Poslednja kupovina</span><b>${f.field_20 ? fmtDate(f.field_20) : '—'}</b>${d !== null ? `<span class="s">pre ${d} dana</span>` : ''}</div>
       <div class="kpi"><span class="s">Klasa · operater</span><b>${esc(f.field_12 || '—')}</b><span class="s">${esc(f.field_10 || 'nedodeljen')}</span></div>
     </div>
+    ${(() => { const d = dueOf(it), p = planOf(it); return `<div class="card plan"><b>Plan obilaska:</b> ${esc(p.label)}${d && !d.top ? ` · ${d.over > 0 ? '<b class="late">kasni ' + d.over + ' d</b>' : d.over === 0 ? '<b class="late">danas na redu</b>' : 'na redu za ' + (-d.over) + ' d'}` : d && d.never ? ' · nikad obiđen' : ''}${it.f.Obici ? ' · <span class="badge warn">obići</span>' : ''}</div>`; })()}
+    <div class="seg ktabs"><button class="${S.ktab !== 'posete' ? 'on' : ''}" data-a="ktab" data-v="pregled">Pregled</button><button class="${S.ktab === 'posete' ? 'on' : ''}" data-a="ktab" data-v="posete">Posete i beleške · ${visitHistory(it).length}</button></div>
+    ${S.ktab === 'posete' ? vPosete(it) : `
     <h2>Trenutno u BizniSoft-u</h2>
     <div class="card"><dl class="kv">
       <dt>Status</dt><dd>${esc(f.field_11 || '—')}</dd>
@@ -489,13 +663,13 @@ function vKartica() {
       <dt>Kontakt</dt><dd>${esc([f.field_7, f.field_5].filter(Boolean).join(' · ') || '—')}</dd>
       ${f.field_17 ? `<dt>NETO</dt><dd>${esc(f.field_17)}</dd>` : ''}
     </dl></div>
-    ${f.Beleske ? `<h2>Beleške</h2><div class="card" style="white-space:pre-wrap">${esc(f.Beleske)}</div>` : ''}
+    ${f.Beleske ? `<h2>Beleške</h2><div class="card" style="white-space:pre-wrap">${esc(f.Beleske)}</div>` : ''}`}
     <div class="err" id="err"></div>
   </main><div class="foot"><div class="in">${visitFoot(it, i)}</div></div>`;
 }
 function visitFoot(it, i) {
   if (S.busy) return `<button class="btn pri" id="busy" disabled>${esc(S.busyMsg || 'Tražim lokaciju…')}</button>`;
-  if (!S.visit) return `<button class="btn pri" data-a="visit">Započni posetu</button>`;
+  if (!S.visit) return `<button class="btn" data-a="note">Brza beleška</button><button class="btn pri" style="flex:2" data-a="visit">Započni posetu</button>`;
   if (S.visit.id !== it.id) return `<button class="btn" data-a="govisit">Poseta u toku: ${esc(S.visit.n)} ›</button>`;
   if (S.visit.draft) return `<button class="btn" data-a="endvisit">Završi posetu</button><button class="btn pri" style="flex:2" data-a="start">Nastavi audit · korak ${S.visit.draft.step + 1}/${STEPS.length}</button>`;
   return `<button class="btn" data-a="endvisit">Završi posetu</button><button class="btn pri" style="flex:2" data-a="start">${S.visit.audit ? 'Audit je urađen · ponovi' : i ? 'Ponovi audit' : 'Pokreni audit'}</button>`;
@@ -594,7 +768,8 @@ async function finishAudit() {
   await queue({ type: 'patch', itemId: S.cur.id, fields });
   for (const p of S.photos) await queue({ type: 'photo', name: p.name, blob: p.blob });
   S.photos.forEach(p => URL.revokeObjectURL(p.url)); S.photos = [];
-  if (S.visit && S.visit.id === S.cur.id) { S.visit.audit = true; S.visit.draft = null; saveDay(); }
+  if (S.visit && S.visit.id === S.cur.id) { S.visit.audit = true; S.visit.draft = null; }
+  if (S.day) S.day.audits = (S.day.audits || 0) + 1; saveDay();
   S.d = null;
   await logEvent('AUDIT', null, S.cur, { Napomena: d.AuditIshod });
   toast((navigator.onLine || DEMO ? 'Audit je sačuvan.' : 'Audit je sačuvan u telefonu, šalje se kad bude mreže.') + ' Poseta i dalje traje.');
@@ -644,11 +819,19 @@ document.addEventListener('click', async e => {
     case 'teren': S.teren = v; S.q = ''; S.filter = 'open'; go('kupci'); break;
     case 'filter': S.filter = v; rerender(); break;
     case 'sort': S.sort = v; rerender(); break;
-    case 'kupac': S.cur = S.items.find(x => String(x.id) === v); go('kartica'); break;
+    case 'kupac': S.cur = S.items.find(x => String(x.id) === v); S.from = S.view; S.ktab = 'pregled'; go('kartica'); break;
+    case 'tab': S.view = v; S.showAll = false; history.replaceState({ v }, ''); render(); scrollTo(0, 0); break;
+    case 'pravac': { const t = (S.pravac && S.pravac.t) || [], i = t.indexOf(v); i < 0 ? t.push(v) : t.splice(i, 1); S.pravac = { date: new Date().toLocaleDateString('sr-RS'), t }; try { localStorage.setItem(LS_PRAVAC, JSON.stringify(S.pravac)); } catch (e) { } S.showAll = false; rerender(); break; }
+    case 'showall': S.showAll = true; rerender(); break;
+    case 'ktab': S.ktab = v; rerender(); break;
+    case 'note': openNote(false); break;
+    case 'nkobici': S.nk.obici = !S.nk.obici; rerender(); break;
+    case 'notesave': await saveNote(); break;
+    case 'logout': if (DEMO) toast('Probni režim.'); else if (await askSure('Odjava', '<p>Odjaviti se sa aplikacije? Podaci koji čekaju na slanje ostaju u telefonu.</p>', 'Odjavi me')) S.pca.logoutRedirect({ account: S.account }); break;
     case 'notel': toast('Telefon nije upisan.'); break;
     case 'nomail': toast('Mejl nije upisan.'); break;
     case 'start': startAudit(); break;
-    case 'novi': go('novi'); break;
+    case 'novi': { const c = await askChoice('Nov objekat', [['visit', 'Poseta novom kupcu', 'Ušao sam, razgovaram i radim ličnu kartu (audit).'], ['note', 'Brza beleška', 'Prolazio sam: slika, napomena i okvirna lokacija, pa dolazim sledeći put.']]); if (c === 'visit') { S.from = S.view; go('novi'); } else if (c === 'note') openNote(true); break; }
     case 'novisave': await saveNovi(); break;
     case 'pick': d[STEPS[S.step].f] = d[STEPS[S.step].f] === v ? '' : v; rerender(); break;
     case 'pickk': d[el.dataset.k] = d[el.dataset.k] === v ? '' : v; rerender(); break;
@@ -677,10 +860,15 @@ document.addEventListener('input', e => {
   const k = e.target.dataset.i; if (!k) return;
   if (k === 'q') { S.q = e.target.value; const l = document.getElementById('list'); if (l) l.innerHTML = kupciList().html; return; }
   if (k === 'optq') { const q = e.target.value.toLowerCase(); document.querySelectorAll('#opts .opt').forEach(b => b.style.display = b.textContent.toLowerCase().includes(q) ? '' : 'none'); return; }
-  if (k === 'photo') return;
+  if (k === 'photo' || k === 'nphoto') return;
+  if (k.startsWith('nk_')) { if (S.nk) S.nk[k] = e.target.value; return; }
   if (S.d) { S.d[k] = e.target.value; saveDraft(); }
 });
 document.addEventListener('change', async e => {
+  if (e.target.dataset.i === 'nphoto' && e.target.files.length && S.nk) {
+    for (const file of e.target.files) { const blob = await shrink(file); S.nk.photos.push({ blob, url: URL.createObjectURL(blob) }); }
+    render(); return;
+  }
   if (e.target.dataset.i !== 'photo' || !e.target.files.length) return;
   for (const file of e.target.files) {
     const blob = await shrink(file);
@@ -715,11 +903,12 @@ async function refresh(manual) {
     // zadrži lokalne nove kupce koji još nisu poslati
     const tmp = S.items.filter(x => String(x.id).startsWith('tmp'));
     S.items = fresh.concat(tmp);
+    try { await fetchLog(); } catch (e) { console.warn('log', e); }
     // ponovo primeni izmene koje još čekaju
     pend.filter(o => o.type === 'patch').forEach(o => { const it = S.items.find(x => x.id === o.itemId); if (it) Object.keys(o.fields).forEach(k => { if (!k.includes('@')) it.f[k] = o.fields[k]; }); });
     if (S.cur) S.cur = S.items.find(x => x.id === S.cur.id) || S.cur;
     saveItems();
-    if (S.view !== 'audit' && S.view !== 'novi') render();
+    if (!['audit', 'novi', 'beleska', 'krajposete'].includes(S.view)) render();
     if (manual) toast('Osveženo: ' + S.items.length + ' kupaca.');
   } catch (e) { console.warn(e); toast('Osvežavanje nije uspelo: ' + String(e.message || e).slice(0, 80)); }
 }
@@ -727,12 +916,13 @@ async function refresh(manual) {
 function resumeVisit() {
   if (!S.visit) return false;
   const it = S.items.find(x => x.id === S.visit.id || (x.f.Title && x.f.Title === S.visit.sifra)); if (!it) return false;
+  if (S.visit.id !== it.id) { const old = S.visit.id; S.visit.id = it.id; if (S.day && S.day.visits) S.day.visits.forEach(v => { if (v.id === old) v.id = it.id; }); saveDay(); } // stara poseta sa privremenom šifrom
   S.cur = it; go('kartica'); toast('Nastavljaš posetu: ' + S.visit.n); return true;
 }
 async function boot() {
-  history.replaceState({ v: 'tereni' }, '');
+  history.replaceState({ v: 'danas' }, '');
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  if (DEMO) { S.items = demoItems(); S.view = 'tereni'; resumeVisit() || render(); return; }
+  if (DEMO) { S.items = demoItems(); S.view = 'danas'; resumeVisit() || render(); return; }
   try { await initAuth(); } catch (e) { $app.innerHTML = `<div class="login"><h1>Greška pri prijavi</h1><p class="s">${esc(e.message)}</p></div>`; return; }
   if (!S.account) { S.view = 'login'; render(); return; }
   const cached = loadCached();

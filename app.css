@@ -115,3 +115,26 @@ h2{font-size:15px;margin:18px 2px 8px;color:var(--muted);font-weight:600}
 .modal h2{margin:0 0 8px;font-size:18px}
 .modal .mb p{margin:8px 0} .modal .mb ul{margin:6px 0;padding-left:20px}
 .modal .mbtn{display:flex;gap:10px;margin-top:14px} .modal .mbtn .btn{flex:1}
+
+/* donja traka */
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:7;display:flex;justify-content:center;background:var(--card);border-top:1px solid var(--line);padding:4px 0 calc(4px + env(safe-area-inset-bottom))}
+.tabs button{flex:1;max-width:180px;border:none;background:none;color:var(--muted);font-size:12px;padding:6px 0;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;min-height:52px}
+.tabs button span{font-size:20px;line-height:1}
+.tabs button.on{color:var(--brand);font-weight:600}
+.tabs-on .fab{bottom:calc(76px + env(safe-area-inset-bottom))}
+.tabs-on .toast{bottom:calc(150px + env(safe-area-inset-bottom))}
+.tabs-on .main{padding-bottom:calc(160px + env(safe-area-inset-bottom))}
+/* danas */
+.sum4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px}
+.sum4 .kpi{padding:8px 8px}.sum4 .kpi b{font-size:17px}.sum4 .kpi .s{font-size:12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.chips button{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:8px 12px;font-size:14px;cursor:pointer}
+.chips button i{font-style:normal;display:inline-block;min-width:20px;padding:0 6px;border-radius:99px;background:var(--brand-soft);color:var(--brand);font-size:12px;margin-left:4px}
+.chips button.on{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+.chips button.on i{background:var(--brand-ink);color:var(--brand)}
+.kl{display:inline-block;min-width:28px;text-align:center;font-weight:700;border-radius:8px;background:var(--brand-soft);color:var(--brand);padding:2px 6px;margin-bottom:4px}
+.late{color:var(--bad,#b3261e)}
+.card.plan{padding:10px 12px;margin:12px 0 10px;font-size:14px}
+.ktabs{margin-top:4px}
+.hrow{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.hrow .t{font-weight:600;font-size:15px}.hrow .s2{margin-top:4px;font-size:14px;white-space:pre-wrap}
