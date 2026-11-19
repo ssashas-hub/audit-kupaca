@@ -157,6 +157,101 @@ function buildLogIndex() {
   S.log.forEach(e => { if (e.s && /POSETE/.test(e.t)) { const t = Date.parse(e.v) || 0; if (t > (S.lastV[e.s] || 0)) S.lastV[e.s] = t; } });
 }
 buildLogIndex();
+/* ---------- filteri ekrana Danas ---------- */
+const norm = s => String(s || '').toUpperCase().replace(/Đ/g, 'DJ').normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+const daysOf = v => { const t = norm(arr(v).join(',')), out = DANI.filter(d => t.includes(norm(d))); return out.length ? out : ['nije upisano']; };
+const FDEF = {
+  pravac: { l: 'po pravcu', ic: '🧭', t: 'Pravac', get: it => [terenOf(it)] },
+  kat: { l: 'po kategoriji', ic: '🏷', t: 'Kategorija', get: it => [klasaOf(it) || 'bez kategorije'] },
+  tip: { l: 'po tipu kupca', ic: '🏪', t: 'Tip kupca', get: it => [cv(it.f.AuditSegment) || 'bez segmenta'] },
+  poz: { l: 'po danu poziva', ic: '📞', t: 'Dan poziva', get: it => daysOf(it.f.AuditPozivanje) },
+  raz: { l: 'po danu razvoza', ic: '🚚', t: 'Dan razvoza', get: it => daysOf(it.f.AuditRazvoz) },
+  st: { t: 'Status', get: it => [cv(it.f.StatusNovi) || 'nije upisan'] },
+  plac: { t: 'Način plaćanja', get: it => [cv(it.f.AuditNacinPlacanja) || 'nije upisan'] },
+  op: { t: 'Operater', get: it => [it.f.field_10 || 'nedodeljen'] },
+  plan: { t: 'Plan obilaska', get: it => [planOf(it).label] },
+  vel: { t: 'Veličina', get: it => [cv(it.f.Velicina) || 'nije upisana'] },
+  pot: { t: 'Potencijal', get: it => [cv(it.f.Potencijal) || 'nije upisan'] },
+  ob: { t: 'Oznaka „obići”', get: it => [it.f.Obici ? 'označen' : 'nije označen'] },
+  lok: { t: 'Lokacija objekta', get: it => [parseLoc(it.f.Lokacija) ? 'zabeležena' : 'nije zabeležena'] }
+};
+const MAINF = ['pravac', 'kat', 'tip', 'poz', 'raz'], MOREF = ['st', 'plac', 'op', 'plan', 'vel', 'pot', 'ob', 'lok'];
+const LS_FLT = 'ak_flt_v1';
+S.flt = {}; S.dq = ''; S.onlyDue = true; S.obOpen = true;
+try { const x = JSON.parse(localStorage.getItem(LS_FLT) || 'null'); if (x && x.date === new Date().toLocaleDateString('sr-RS')) S.flt = x.f || {}; } catch (e) { }
+if (!S.flt.pravac && S.pravac && S.pravac.t) S.flt.pravac = S.pravac.t;
+const saveFlt = () => { try { localStorage.setItem(LS_FLT, JSON.stringify({ date: new Date().toLocaleDateString('sr-RS'), f: S.flt })); } catch (e) { } };
+const selOf = k => S.flt[k] || [];
+const fMatch = (it, skip) => Object.keys(S.flt).every(k => k === skip || !selOf(k).length || FDEF[k].get(it).some(v => selOf(k).includes(v)));
+function fOptions(k) {
+  const base = k === 'pravac' ? S.items : S.items.filter(it => !selOf('pravac').length || selOf('pravac').includes(terenOf(it)));
+  const c = {}; base.forEach(it => FDEF[k].get(it).forEach(v => c[v] = (c[v] || 0) + 1));
+  const ord = { kat: ['A', 'B', 'C', 'D', 'E'], poz: DANI, raz: DANI }[k];
+  return Object.keys(c).sort((a, b) => ord ? ((ord.indexOf(a) + 1 || 99) - (ord.indexOf(b) + 1 || 99)) : /^nije|^bez|^ned/.test(a) ? 1 : /^nije|^bez|^ned/.test(b) ? -1 : a.localeCompare(b, 'sr', { numeric: true })).map(v => [v, c[v]]);
+}
+function pickSheet(title, groups) { // groups: [[key, title, [[val,count]], selected[]]]
+  return new Promise(res => {
+    const sel = {}; groups.forEach(([k, , , cur]) => sel[k] = new Set(cur));
+    const m = document.createElement('div'); m.className = 'modal sheet';
+    const paint = () => m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><div class="sbody">${groups.map(([k, t, opts]) => `${groups.length > 1 ? `<div class="sh">${esc(t)}</div>` : ''}${opts.map(([v, n]) => `<button class="ck ${sel[k].has(v) ? 'on' : ''}" data-k="${k}" data-v="${esc(v)}"><span class="box2">${sel[k].has(v) ? '✓' : ''}</span><span class="grow">${esc(v)}</span><span class="s">${n}</span></button>`).join('') || '<div class="s">Nema podataka.</div>'}`).join('')}</div><div class="mbtn"><button class="btn" data-m="clear">Poništi</button><button class="btn pri" data-m="ok">Primeni</button></div></div>`;
+    paint();
+    m.addEventListener('click', e => {
+      e.stopPropagation();
+      const c = e.target.closest('.ck'); if (c) { const st = sel[c.dataset.k]; st.has(c.dataset.v) ? st.delete(c.dataset.v) : st.add(c.dataset.v); const sc = m.querySelector('.sbody').scrollTop; paint(); m.querySelector('.sbody').scrollTop = sc; return; }
+      const b = e.target.closest('[data-m]');
+      if (b && b.dataset.m === 'clear') { Object.values(sel).forEach(x => x.clear()); paint(); return; }
+      if (b && b.dataset.m === 'ok') { m.remove(); const out = {}; Object.keys(sel).forEach(k => out[k] = [...sel[k]]); res(out); return; }
+      if (e.target === m) { m.remove(); res(null); }
+    });
+    document.body.appendChild(m);
+  });
+}
+async function openFilter(k) {
+  const r = k === 'more'
+    ? await pickSheet('Još filtera', MOREF.map(x => [x, FDEF[x].t, fOptions(x), selOf(x)]))
+    : await pickSheet(FDEF[k].t, [[k, FDEF[k].t, fOptions(k), selOf(k)]]);
+  if (!r) return;
+  Object.keys(r).forEach(x => { if (r[x].length) S.flt[x] = r[x]; else delete S.flt[x]; });
+  saveFlt(); S.showAll = false; render();
+}
+// teren za nov objekat: po mestu, pa po najbližem kupcu sa lokacijom, pa po izabranom pravcu
+function terenFor(mesto, pos) {
+  const m = norm(mesto);
+  if (m) {
+    const c = {}; S.items.forEach(it => { const t = cv(it.f.AuditTeren); if (t && norm(it.f.field_4) === m) c[t] = (c[t] || 0) + 1; });
+    const best = Object.entries(c).sort((a, b) => b[1] - a[1])[0]; if (best) return best[0];
+    const t = TER.find(x => norm(x.slice(x.indexOf(' ') + 1)) === m); if (t) return t;
+  }
+  if (pos) { let bd = 15000, bt = null; S.items.forEach(it => { const l = parseLoc(it.f.Lokacija), t = cv(it.f.AuditTeren); if (l && t) { const d = dist(pos, l); if (d < bd) { bd = d; bt = t; } } }); if (bt) return bt; }
+  const sel = selOf('pravac'); return sel.length === 1 && sel[0] !== 'Bez terena' ? sel[0] : null;
+}
+// lokacija i vreme iz slike (EXIF), ako ih telefon nije sklonio
+async function exifInfo(file) {
+  try {
+    const b = new DataView(await file.slice(0, 262144).arrayBuffer());
+    if (b.getUint16(0) !== 0xFFD8) return null;
+    let o = 2;
+    while (o < b.byteLength - 10) {
+      const mk = b.getUint16(o), len = b.getUint16(o + 2);
+      if (mk === 0xFFE1 && b.getUint32(o + 4) === 0x45786966) {
+        const t = o + 10, le = b.getUint16(t) === 0x4949, u16 = p => b.getUint16(p, le), u32 = p => b.getUint32(p, le);
+        const ifd = p => { const n = u16(p), out = {}; for (let i = 0; i < n; i++) { const e = p + 2 + i * 12; out[u16(e)] = { cnt: u32(e + 4), off: e + 8 }; } return out; };
+        const asc = e => { const p = e.cnt > 4 ? t + u32(e.off) : e.off; let x = ''; for (let i = 0; i < e.cnt - 1; i++) x += String.fromCharCode(b.getUint8(p + i)); return x; };
+        const rat = (e, i) => { const p = t + u32(e.off) + i * 8; return u32(p) / (u32(p + 4) || 1); };
+        const i0 = ifd(t + u32(t + 4)), res = {};
+        if (i0[0x8769]) { const ex = ifd(t + u32(i0[0x8769].off)); if (ex[0x9003]) res.time = asc(ex[0x9003]); }
+        if (i0[0x8825]) {
+          const gg = ifd(t + u32(i0[0x8825].off));
+          if (gg[2] && gg[4]) { const dms = e => rat(e, 0) + rat(e, 1) / 60 + rat(e, 2) / 3600; let lat = dms(gg[2]), lon = dms(gg[4]); if (gg[1] && asc(gg[1]) === 'S') lat = -lat; if (gg[3] && asc(gg[3]) === 'W') lon = -lon; if (lat && lon) { res.lat = +lat.toFixed(6); res.lon = +lon.toFixed(6); } }
+        }
+        return res;
+      }
+      if ((mk & 0xFF00) !== 0xFF00) break;
+      o += 2 + len;
+    }
+  } catch (e) { }
+  return null;
+}
 async function fetchLog() {
   if (!S.logList) return;
   let url = '/sites/' + S.site + '/lists/' + S.logList + '/items?$expand=fields($select=Title,Vreme,KupacSifra,KupacNaziv,Korisnik,Udaljenost,Napomena)&$top=999';
@@ -309,9 +404,9 @@ function bar(title, back) {
 }
 function saveDraft() { if (S.visit && S.d && S.view === 'audit' && S.cur && S.cur.id === S.visit.id) { S.visit.draft = { d: S.d, step: S.step }; saveDay(); } }
 function render() {
-  saveDraft();
+  saveDraft(); if (S.visit) visitItem();
   let v = { danas: vDanas, vise: vVise, beleska: vBeleska, tereni: vTereni, kupci: vKupci, kartica: vKartica, audit: vAudit, novi: vNovi, login: vLogin, kraj: vKraj, krajposete: vKrajPosete }[S.view] || vTereni;
-  if (S.view !== 'login' && !dayOn() && !S.visit) v = vDan;
+  if (S.view !== 'login' && !dayOn() && !(S.visit && sameDay(S.visit.start))) v = vDan;
   $app.innerHTML = (DEMO ? '<div class="demo">Probni režim – izmišljeni kupci, ništa se ne šalje</div>' : '') + v();
   document.body.classList.toggle('tabs-on', !!document.querySelector('.tabs'));
   paintSync();
@@ -346,6 +441,7 @@ function gpsFail(msg, what, far) {
 async function noGps(what) {
   const why = 'BEZ GPS-a: ' + (S.gpsErr || 'preskočeno');
   if (what === 'day') {
+    await autoCloseOldVisit();
     S.day = { date: new Date().toLocaleDateString('sr-RS'), start: new Date().toISOString(), visits: [], noGps: true };
     saveDay(); await logEvent('POČETAK DANA', null, null, { Napomena: why });
     S.view = 'danas'; render(); toast('Radni dan je počeo bez GPS-a.');
@@ -357,6 +453,7 @@ async function noGps(what) {
   } else if (what === 'novi') await saveNovi(true);
 }
 async function dayStart() {
+  await autoCloseOldVisit();
   S.busy = true; render();
   try {
     const p = await getPos();
@@ -372,6 +469,18 @@ async function dayEnd() {
   S.day.end = new Date().toISOString(); saveDay();
   await logEvent('KRAJ DANA', p, null, p ? {} : { Napomena: 'lokacija nije dostupna' });
   S.busy = false; S.view = 'danas'; render();
+}
+const sameDay = t => t && new Date(t).toLocaleDateString('sr-RS') === new Date().toLocaleDateString('sr-RS');
+function visitItem() {
+  if (!S.visit) return null;
+  const it = S.items.find(x => x.id === S.visit.id) || S.items.find(x => S.visit.sifra && x.f.Title === S.visit.sifra) || S.items.find(x => (x.f.field_1 || x.f.Title) === S.visit.n) || null;
+  if (it && it.id !== S.visit.id) { const old = S.visit.id; S.visit.id = it.id; S.visit.sifra = it.f.Title; if (S.day && S.day.visits) S.day.visits.forEach(v => { if (v.id === old) v.id = it.id; }); saveDay(); }
+  return it;
+}
+async function autoCloseOldVisit() {
+  if (!S.visit || sameDay(S.visit.start)) return;
+  await logEvent('KRAJ POSETE', null, visitItem(), { Napomena: `zatvorena automatski (bila otvorena od ${fmtDate(S.visit.start)} ${hhmm(S.visit.start)})` });
+  S.visit = null; saveDay();
 }
 function beginVisit(it, p) {
   S.visit = { id: it.id, sifra: it.f.Title, n: it.f.field_1 || it.f.Title, start: new Date().toISOString(), audit: false };
@@ -446,7 +555,7 @@ function vKrajPosete() {
 async function visitEnd() {
   const k = S.vk || {}; k.b = (document.getElementById('vkb') || {}).value || k.b || '';
   if (!k.i) { document.getElementById('err').textContent = 'Izaberi ishod posete.'; return; }
-  const it = S.items.find(x => x.id === S.visit.id) || S.cur;
+  const it = visitItem();
   S.busy = true; render();
   let p = null; try { p = await getPos(); } catch (e) { }
   const home = it && parseLoc(it.f.Lokacija), extra = { Napomena: k.i + (k.b.trim() ? ': ' + k.b.trim() : '') + (S.visit.audit ? '' : S.visit.draft ? ' (audit započet, nije završen)' : ' (bez audita)') + (p ? '' : ' [lokacija nije dostupna]') };
@@ -470,32 +579,49 @@ function dayStats() {
   const avg = done.length ? Math.max(1, Math.round(done.reduce((a, v) => a + (Date.parse(v.e) - Date.parse(v.s)) / 60000, 0) / done.length)) : 0;
   return { n: vs.length, avg, a: (S.day && S.day.audits) || 0, b: (S.day && S.day.notes) || 0 };
 }
-function planRows() {
-  const sel = (S.pravac && S.pravac.t) || [], out = [];
-  S.items.forEach(it => { if (!sel.includes(terenOf(it))) return; const d = dueOf(it); if (!d) return; if (d.top || d.over >= -7) out.push({ it, d }); });
+function danasData() {
+  const q = norm(S.dq), anyF = Object.keys(S.flt).some(k => selOf(k).length);
+  if (!q && !anyF) return null;
+  let base = S.items.filter(it => q ? [it.f.Title, it.f.field_1, it.f.field_2, it.f.field_3, it.f.field_4].some(x => norm(x).includes(q)) && fMatch(it, 'pravac') : fMatch(it));
+  const ob = base.filter(it => it.f.Obici && cv(it.f.StatusNovi) !== 'zatvoren').sort((x, y) => String(y.f.Title).localeCompare(String(x.f.Title)));
   const kl = it => 'ABCDE'.indexOf(klasaOf(it)) < 0 ? 9 : 'ABCDE'.indexOf(klasaOf(it));
-  out.sort((x, y) => (x.d.top === y.d.top ? 0 : x.d.top ? -1 : 1) || (x.d.top ? 0 : y.d.over - x.d.over) || kl(x.it) - kl(y.it) || num(y.it.f.field_19) + num(y.it.f.field_18) / 2 - num(x.it.f.field_19) - num(x.it.f.field_18) / 2);
-  return out;
+  const prom = it => num(it.f.field_19) + num(it.f.field_18) / 2;
+  let rows = base.filter(it => !it.f.Obici).map(it => ({ it, d: dueOf(it) }));
+  if (S.onlyDue && !q) rows = rows.filter(r => r.d && (r.d.top || r.d.over >= -7));
+  rows.sort((x, y) => { const a = x.d, b = y.d; if (!a || !b) return (a ? -1 : b ? 1 : 0) || prom(y.it) - prom(x.it); return (a.top === b.top ? 0 : a.top ? -1 : 1) || (a.top ? 0 : b.over - a.over) || kl(x.it) - kl(y.it) || prom(y.it) - prom(x.it); });
+  return { ob, rows, q };
+}
+function danasList() {
+  const D = danasData();
+  if (!D) return '<div class="empty">Izaberi pravac (jedan ili više terena) ili upiši naziv kupca u pretragu.</div>';
+  const lim = S.showAll ? D.rows.length : 40;
+  return (D.ob.length ? `<button class="sec" data-a="obtoggle">${S.obOpen ? '▾' : '▸'} Za obići · ${D.ob.length}</button>${S.obOpen ? D.ob.map(it => rowPlan({ it, d: dueOf(it) })).join('') : ''}` : '')
+    + `<div class="sech"><span>${D.q ? 'Rezultati pretrage' : S.onlyDue ? 'Na redu' : 'Svi kupci'} · ${D.rows.length}</span>${D.q ? '' : `<button class="lnk" data-a="onlydue">${S.onlyDue ? 'prikaži sve' : 'samo na redu'}</button>`}</div>`
+    + (D.rows.slice(0, lim).map(rowPlan).join('') || `<div class="empty">${D.q ? 'Nema kupaca za tu pretragu.' : 'Niko nije na redu za izabrani pravac i filtere.'}</div>`)
+    + (D.rows.length > lim ? `<button class="btn" style="width:100%" data-a="showall">Prikaži sve (${D.rows.length})</button>` : '');
 }
 function rowPlan({ it, d }) {
   const f = it.f, k = klasaOf(it);
-  const when = d.ob ? (d.lv ? 'označen „obići” · poslednja poseta ' + fmtDate(d.lv) : 'označen „obići” · još nije obiđen') : d.never ? 'nikad obiđen' : `poslednja poseta ${fmtDate(d.lv)} · ` + (d.over > 0 ? `<b class="late">kasni ${d.over} d</b>` : d.over === 0 ? '<b class="late">danas na redu</b>' : `na redu za ${-d.over} d`);
-  const badges = (d.ob ? '<span class="badge warn">obići</span> ' : '') + (cv(f.StatusNovi) === 'potencijalni' ? '<span class="badge brand">potencijalni</span> ' : '') + (S.visit && S.visit.id === it.id ? '<span class="badge ok">poseta u toku</span>' : '');
+  const when = !d ? 'plan: ' + esc(planOf(it).label) : d.ob ? (d.lv ? 'obići · poslednja poseta ' + fmtDate(d.lv) : 'obići · još nije obiđen') : d.never ? 'nikad obiđen' : `poslednja poseta ${fmtDate(d.lv)} · ` + (d.over > 0 ? `<b class="late">kasni ${d.over} d</b>` : d.over === 0 ? '<b class="late">danas na redu</b>' : `na redu za ${-d.over} d`);
+  const badges = (cv(f.StatusNovi) === 'potencijalni' ? '<span class="badge brand">potencijalni</span> ' : '') + (S.visit && S.visit.id === it.id ? '<span class="badge ok">poseta u toku</span>' : '');
   return `<div class="row" data-a="kupac" data-v="${esc(it.id)}"><div class="grow"><div class="t ell">${esc(f.field_1 || f.Title)}</div><div class="s ell">${esc([f.field_3, f.field_4].filter(Boolean).join(', ') || '—')}</div><div class="s">${when}</div>${badges ? `<div>${badges}</div>` : ''}</div><div class="right">${k ? `<div class="kl">${k}</div>` : ''}<div class="s">${money(f.field_19)}</div></div></div>`;
 }
+function fBtn(k) {
+  const d = FDEF[k], sel = selOf(k);
+  const txt = sel.length ? sel.slice(0, 2).join(', ') + (sel.length > 2 ? ` +${sel.length - 2}` : '') : d.l;
+  return `<button class="fsel ${sel.length ? 'on' : ''}" data-a="fsel" data-v="${k}"><span class="ic">${d.ic}</span><span class="fl ell">${esc(txt)}</span>${sel.length ? `<span class="fx" data-a="fclr" data-v="${k}">✕</span>` : '<span class="cv">▾</span>'}</button>`;
+}
 function vDanas() {
-  const st = dayStats(), sel = (S.pravac && S.pravac.t) || [];
-  const cnt = {}; S.items.forEach(it => { const d = dueOf(it); if (d && (d.top || d.over >= -7)) cnt[terenOf(it)] = (cnt[terenOf(it)] || 0) + 1; });
-  const ters = [...new Set(S.items.map(terenOf))].sort((a, b) => a === 'Bez terena' ? 1 : b === 'Bez terena' ? -1 : a.localeCompare(b, 'sr', { numeric: true }));
-  const rows = sel.length ? planRows() : [], lim = S.showAll ? rows.length : 40;
+  const st = dayStats(), more = MOREF.filter(k => selOf(k).length).length;
   return bar('Danas') + `<main class="main">
     ${visitBanner()}
     <div class="sum4"><div class="kpi"><span class="s">Posete</span><b>${st.n}</b></div><div class="kpi"><span class="s">Prosečno</span><b>${st.avg ? st.avg + ' min' : '—'}</b></div><div class="kpi"><span class="s">Auditi</span><b>${st.a}</b></div><div class="kpi"><span class="s">Beleške</span><b>${st.b}</b></div></div>
-    <div class="s" style="margin:-4px 2px 12px">${S.day ? 'Radni dan od ' + hhmm(S.day.start) + (S.day.noGps ? ' (bez GPS-a)' : '') : ''}</div>
-    <h2>Pravac za danas</h2>
-    <div class="chips">${ters.map(t => `<button class="${sel.includes(t) ? 'on' : ''}" data-a="pravac" data-v="${esc(t)}">${esc(t)}${cnt[t] ? ` <i>${cnt[t]}</i>` : ''}</button>`).join('')}</div>
-    ${!sel.length ? '<div class="empty">Izaberi jedan ili više terena kojima ideš danas. Broj pored terena pokazuje koliko je kupaca na redu.</div>'
-      : `<h2>Na redu · ${rows.length}</h2>${rows.slice(0, lim).map(rowPlan).join('') || '<div class="empty">Na izabranim terenima niko nije na redu za obilazak.</div>'}${rows.length > lim ? `<button class="btn" style="width:100%" data-a="showall">Prikaži sve (${rows.length})</button>` : ''}`}
+    <div class="s" style="margin:-4px 2px 10px">${S.day ? 'Radni dan od ' + hhmm(S.day.start) + (S.day.noGps ? ' (bez GPS-a)' : '') : ''}</div>
+    <div class="fsel srch"><span class="ic">🔍</span><input type="search" data-i="dq" placeholder="Pretraži kupce po nazivu, šifri, adresi" value="${esc(S.dq)}"></div>
+    ${MAINF.map(fBtn).join('')}
+    <button class="fsel ${more ? 'on' : ''}" data-a="fsel" data-v="more"><span class="ic">⚙</span><span class="fl">Još filtera${more ? ` (${more})` : ''}</span><span class="cv">›</span></button>
+    ${Object.keys(S.flt).length ? '<button class="lnk" style="margin:2px 2px 10px" data-a="fclrall">Poništi sve filtere</button>' : ''}
+    <div id="dlist">${danasList()}</div>
   </main><button class="fab" data-a="novi">＋ Nov kupac</button>` + tabs('danas');
 }
 function vVise() {
@@ -514,10 +640,11 @@ function vBeleska() {
     ${it ? `<div class="t">${esc(it.f.field_1 || it.f.Title)}</div><div class="s" style="margin-bottom:12px">${esc([it.f.field_3, it.f.field_4].filter(Boolean).join(', '))}</div>` : '<p class="s">Objekat koji si video u prolazu. Upisuje se kao potencijalni kupac, a poseta i lična karta se rade kasnije.</p>'}
     ${nw ? fld('nk_naziv', 'Naziv objekta', 'text', 'ako ne znaš, ostavi prazno') + fld('nk_adresa', 'Adresa') + fld('nk_mesto', 'Mesto') + fld('nk_tel', 'Telefon', 'tel') : ''}
     <div class="fld"><label>Napomena</label><textarea data-i="nk_text" placeholder="Šta si video, zašto vredi doći, kada je otvoreno…">${esc(k.nk_text || '')}</textarea></div>
-    <label class="big-act"><span>📷</span>Slikaj<input type="file" accept="image/*" capture="environment" data-i="nphoto" hidden></label>
+    <div class="pbtns"><label class="big-act"><span>📷</span>Slikaj<input type="file" accept="image/*" capture="environment" data-i="nphoto" hidden></label><label class="big-act"><span>🖼</span>Iz galerije<input type="file" accept="image/*" multiple data-i="nphoto" hidden></label></div>
     <div class="thumbs">${k.photos.map(p => `<img src="${p.url}" alt="">`).join('')}</div>
+    ${k.photoLoc ? `<p class="s ok">📍 Lokacija pročitana sa slike${k.photoLoc.time ? ' (' + esc(k.photoLoc.time.slice(0, 16).replace(/:/g, (m, i) => i < 10 ? '.' : ':')) + ')' : ''}: koristi se za objekat.</p>` : ''}
     <button class="opt ${k.obici ? 'on' : ''}" style="width:100%" data-a="nkobici">${k.obici ? '☑' : '☐'} Obići sledeći put (stavlja ga u plan dana)</button>
-    <p class="s">Lokacija se beleži okvirno, u trenutku čuvanja. Tačna lokacija objekta se beleži pri prvoj poseti.</p>
+    <p class="s">${k.photoLoc ? 'Tačna lokacija objekta se beleži pri prvoj poseti.' : 'Lokacija se beleži okvirno, u trenutku čuvanja (ili sa slike iz galerije, ako je slika ima). Tačna lokacija objekta se beleži pri prvoj poseti.'}</p>
     <div class="err" id="err"></div>
   </main><div class="foot"><div class="in"><button class="btn pri" data-a="notesave" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Čuvam…' : 'Sačuvaj belešku'}</button></div></div>`;
 }
@@ -537,9 +664,9 @@ async function saveNote() {
   if (nw) {
     const code = 'NOVO-' + now.toISOString().slice(2, 16).replace(/\D/g, '');
     const fields = { Title: code, field_1: k.nk_naziv || 'Nepoznat objekat', field_3: k.nk_adresa || '', field_4: k.nk_mesto || '', field_5: k.nk_tel || '', StatusNovi: 'potencijalni', Obici: !!k.obici, Beleske: line };
-    if (p && p.acc <= MAXACC) fields.Lokacija = fmtLoc(p);
-    const sel = (S.pravac && S.pravac.t) || [];
-    if (sel.length === 1 && sel[0] !== 'Bez terena') fields.AuditTeren = sel[0]; else if (S.teren && S.teren !== '*' && S.teren !== 'Bez terena') fields.AuditTeren = S.teren;
+    const loc = k.photoLoc || (p && p.acc <= MAXACC ? p : null);
+    if (loc) fields.Lokacija = fmtLoc(loc);
+    const ter = terenFor(fields.field_4, loc); if (ter) fields.AuditTeren = ter;
     it = { id: 'tmp' + now.getTime(), f: { ...fields } };
     S.items.push(it); saveItems();
     await queue({ type: 'create', tmp: it.id, fields });
@@ -547,13 +674,14 @@ async function saveNote() {
     it = S.cur; const fields = {};
     if (text) { it.f.Beleske = it.f.Beleske ? line + '\n' + it.f.Beleske : line; fields.Beleske = it.f.Beleske; }
     if (k.obici !== !!it.f.Obici) { it.f.Obici = !!k.obici; fields.Obici = !!k.obici; }
+    if (k.photoLoc && !parseLoc(it.f.Lokacija)) { it.f.Lokacija = fmtLoc(k.photoLoc); fields.Lokacija = it.f.Lokacija; }
     saveItems();
     if (Object.keys(fields).length) await queue({ type: 'patch', itemId: it.id, fields });
   }
   const ps = now.toISOString().slice(0, 16).replace(/\D/g, '');
   for (let i = 0; i < k.photos.length; i++) await queue({ type: 'photo', name: `${it.f.Title}-${ps}-b${i + 1}.jpg`, blob: k.photos[i].blob });
   k.photos.forEach(x => URL.revokeObjectURL(x.url));
-  await logEvent('BELEŠKA', p, it, { Napomena: (nw ? 'nov objekat: ' : '') + (text || '(bez teksta)') + (k.photos.length ? ` · slika: ${k.photos.length}` : '') + (k.obici ? ' · obići' : '') + (p ? '' : ' [bez lokacije]') });
+  await logEvent('BELEŠKA', k.photoLoc || p, it, { Napomena: (nw ? 'nov objekat: ' : '') + (text || '(bez teksta)') + (k.photos.length ? ` · slika: ${k.photos.length}` : '') + (k.obici ? ' · obići' : '') + (k.photoLoc ? ' · lokacija sa slike' : p ? '' : ' [bez lokacije]') });
   if (S.day) { S.day.notes = (S.day.notes || 0) + 1; saveDay(); }
   S.busy = false; S.nk = null; S.cur = it; S.ktab = 'posete';
   S.view = 'kartica'; history.replaceState({ v: 'kartica' }, ''); render(); scrollTo(0, 0);
@@ -602,26 +730,28 @@ function vKupci() {
   return bar(title, true) + `<main class="main">
     ${visitBanner()}
     <input id="q" class="search" type="search" placeholder="Naziv, šifra, PIB, adresa…" value="${esc(S.q)}" data-i="q">
-    <div class="seg">${[['open', 'Neobrađeni'], ['back', 'Vratiti se'], ['done', 'Obrađeni'], ['all', 'Svi']].map(([k, n]) => `<button class="${S.filter === k ? 'on' : ''}" data-a="filter" data-v="${k}">${n} ${cnt[k]}</button>`).join('')}</div>
+    <div class="seg">${[['open', 'Neobrađeni'], ['pot', 'Potencijalni / obići'], ['back', 'Vratiti se'], ['done', 'Obrađeni'], ['all', 'Svi']].map(([k, n]) => `<button class="${S.filter === k ? 'on' : ''}" data-a="filter" data-v="${k}">${n} ${cnt[k]}</button>`).join('')}</div>
     <div class="sorts">Redosled: ${[['promet', 'promet'], ['mesto', 'mesto i adresa'], ['naziv', 'naziv']].map(([k, n]) => `<button class="${S.sort === k ? 'on' : ''}" data-a="sort" data-v="${k}">${n}</button>`).join('')}</div>
     <div id="list">${html}</div>
   </main><button class="fab" data-a="novi">＋ Nov kupac</button>` + tabs('tereni');
 }
 function kupciList() {
   const base = inTeren();
-  const cnt = { open: 0, back: 0, done: 0, all: base.length };
-  base.forEach(it => { const i = cv(it.f.AuditIshod); if (i === 'vratiti se') cnt.back++; else if (it.f.Obradjeno) cnt.done++; else cnt.open++; });
+  const cnt = { open: 0, back: 0, done: 0, pot: 0, all: base.length };
+  const isPot = it => it.f.Obici || cv(it.f.StatusNovi) === 'potencijalni';
+  base.forEach(it => { const i = cv(it.f.AuditIshod); if (isPot(it)) cnt.pot++; if (i === 'vratiti se') cnt.back++; else if (it.f.Obradjeno) cnt.done++; else cnt.open++; });
   const q = S.q.trim().toLowerCase();
   let L = base.filter(it => {
     const i = cv(it.f.AuditIshod);
     if (S.filter === 'open' && (it.f.Obradjeno || i === 'vratiti se')) return false;
     if (S.filter === 'back' && i !== 'vratiti se') return false;
     if (S.filter === 'done' && !it.f.Obradjeno) return false;
+    if (S.filter === 'pot' && !isPot(it)) return false;
     if (!q) return true;
     return [it.f.Title, it.f.field_1, it.f.field_2, it.f.field_3, it.f.field_4].some(x => String(x || '').toLowerCase().includes(q));
   });
   const sorters = { promet: (a, b) => num(b.f.field_19) + num(b.f.field_18) / 2 - num(a.f.field_19) - num(a.f.field_18) / 2, naziv: (a, b) => String(a.f.field_1).localeCompare(String(b.f.field_1), 'sr'), mesto: (a, b) => String(a.f.field_4).localeCompare(String(b.f.field_4), 'sr') || String(a.f.field_3).localeCompare(String(b.f.field_3), 'sr') };
-  L.sort(sorters[S.sort]);
+  L.sort(S.filter === 'pot' ? (a, b) => String(b.f.Title).localeCompare(String(a.f.Title)) : sorters[S.sort]);
   return { cnt, html: L.length ? L.slice(0, 300).map(rowKupac).join('') + (L.length > 300 ? `<div class="empty">Prikazano 300 od ${L.length}. Suzi pretragu.</div>` : '') : '<div class="empty">Nema kupaca za ovaj izbor.</div>' };
 }
 function rowKupac(it) {
@@ -730,7 +860,7 @@ function vAudit() {
     body = `<button class="big-act" data-a="gps"><span>📍</span>${d.Lokacija ? 'Zabeleži ponovo' : 'Zabeleži lokaciju'}</button>
       ${d.Lokacija ? `<p class="s" style="margin-top:10px">Zabeleženo: ${esc(d.Lokacija)}</p>` : '<p class="s" style="margin-top:10px">Stani ispred objekta i pritisni dugme.</p>'}`;
   } else if (st.type === 'photo') {
-    body = `<label class="big-act"><span>📷</span>Slikaj objekat<input type="file" accept="image/*" capture="environment" data-i="photo" hidden></label>
+    body = `<div class="pbtns"><label class="big-act"><span>📷</span>Slikaj<input type="file" accept="image/*" capture="environment" data-i="photo" hidden></label><label class="big-act"><span>🖼</span>Iz galerije<input type="file" accept="image/*" multiple data-i="photo" hidden></label></div>
       <div class="thumbs">${S.photos.map(p => `<img src="${p.url}" alt="">`).join('')}</div>
       <p class="s">Može i više slika: izlog, police, unutrašnjost.</p>`;
   } else if (st.type === 'end') {
@@ -789,7 +919,6 @@ async function saveNovi(skipGps) {
   if (!v('n_naziv')) { document.getElementById('err').textContent = 'Upiši naziv radnje.'; return; }
   const now = new Date(), code = 'NOVO-' + now.toISOString().slice(2, 16).replace(/\D/g, '');
   const fields = { Title: code, field_1: v('n_naziv'), field_3: v('n_adresa'), field_4: v('n_mesto'), field_5: v('n_tel'), field_7: v('n_kontakt'), StatusNovi: 'potencijalni' };
-  if (S.teren && S.teren !== '*' && S.teren !== 'Bez terena') fields.AuditTeren = S.teren;
   if (S.visit) { document.getElementById('err').textContent = 'Prvo završi posetu kod: ' + S.visit.n; return; }
   const btn = document.querySelector('[data-a=novisave]'), er = document.getElementById('err'); let p = null;
   if (!skipGps) {
@@ -799,6 +928,7 @@ async function saveNovi(skipGps) {
   if (!await askSure('Zabeleži lokaciju objekta', `<p>${esc(fields.field_1)}<br><span class="s">${esc([fields.field_3, fields.field_4].filter(Boolean).join(', '))}</span></p><p>Lokacija novog objekta biće zabeležena na mestu gde stojiš (preciznost ±${p.acc} m).</p><p><b>Da li stojiš ispred ulaza ovog objekta?</b></p>`, 'Da, zabeleži')) { btn.disabled = false; btn.textContent = 'Upiši i pokreni audit'; return; }
   fields.Lokacija = fmtLoc(p);
   }
+  { const ter = terenFor(fields.field_4, p); if (ter) fields.AuditTeren = ter; else if (S.teren && S.teren !== '*' && S.teren !== 'Bez terena') fields.AuditTeren = S.teren; }
   const it = { id: 'tmp' + now.getTime(), f: { ...fields } };
   S.items.push(it); saveItems();
   await queue({ type: 'create', tmp: it.id, fields });
@@ -821,7 +951,11 @@ document.addEventListener('click', async e => {
     case 'sort': S.sort = v; rerender(); break;
     case 'kupac': S.cur = S.items.find(x => String(x.id) === v); S.from = S.view; S.ktab = 'pregled'; go('kartica'); break;
     case 'tab': S.view = v; S.showAll = false; history.replaceState({ v }, ''); render(); scrollTo(0, 0); break;
-    case 'pravac': { const t = (S.pravac && S.pravac.t) || [], i = t.indexOf(v); i < 0 ? t.push(v) : t.splice(i, 1); S.pravac = { date: new Date().toLocaleDateString('sr-RS'), t }; try { localStorage.setItem(LS_PRAVAC, JSON.stringify(S.pravac)); } catch (e) { } S.showAll = false; rerender(); break; }
+    case 'fsel': await openFilter(v); break;
+    case 'fclr': delete S.flt[v]; saveFlt(); render(); break;
+    case 'fclrall': S.flt = {}; saveFlt(); render(); break;
+    case 'obtoggle': S.obOpen = !S.obOpen; rerender(); break;
+    case 'onlydue': S.onlyDue = !S.onlyDue; S.showAll = false; rerender(); break;
     case 'showall': S.showAll = true; rerender(); break;
     case 'ktab': S.ktab = v; rerender(); break;
     case 'note': openNote(false); break;
@@ -845,7 +979,7 @@ document.addEventListener('click', async e => {
     case 'dayend': await dayEnd(); break;
     case 'kraj': go('kraj'); break;
     case 'visit': await visitStart(); break;
-    case 'govisit': S.cur = S.items.find(x => x.id === S.visit.id) || S.cur; go('kartica'); break;
+    case 'govisit': { const it = visitItem(); if (it) { S.cur = it; S.from = S.view; S.ktab = 'pregled'; go('kartica'); } else { S.vk = null; go('krajposete'); } break; }
     case 'endvisit': S.vk = null; go('krajposete'); break;
     case 'nogps': await noGps(v); break;
     case 'remap': await remap(); break;
@@ -858,6 +992,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('input', e => {
   const k = e.target.dataset.i; if (!k) return;
+  if (k === 'dq') { S.dq = e.target.value; S.showAll = false; const l = document.getElementById('dlist'); if (l) l.innerHTML = danasList(); return; }
   if (k === 'q') { S.q = e.target.value; const l = document.getElementById('list'); if (l) l.innerHTML = kupciList().html; return; }
   if (k === 'optq') { const q = e.target.value.toLowerCase(); document.querySelectorAll('#opts .opt').forEach(b => b.style.display = b.textContent.toLowerCase().includes(q) ? '' : 'none'); return; }
   if (k === 'photo' || k === 'nphoto') return;
@@ -866,7 +1001,11 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', async e => {
   if (e.target.dataset.i === 'nphoto' && e.target.files.length && S.nk) {
-    for (const file of e.target.files) { const blob = await shrink(file); S.nk.photos.push({ blob, url: URL.createObjectURL(blob) }); }
+    for (const file of e.target.files) {
+      if (!S.nk.photoLoc) { const x = await exifInfo(file); if (x && x.lat) S.nk.photoLoc = { lat: x.lat, lon: x.lon, acc: 30, time: x.time }; }
+      const blob = await shrink(file); S.nk.photos.push({ blob, url: URL.createObjectURL(blob) });
+    }
+    e.target.value = '';
     render(); return;
   }
   if (e.target.dataset.i !== 'photo' || !e.target.files.length) return;
@@ -915,8 +1054,8 @@ async function refresh(manual) {
 // ako je aplikacija zatvorena tokom posete, vrati se pravo na tog kupca
 function resumeVisit() {
   if (!S.visit) return false;
-  const it = S.items.find(x => x.id === S.visit.id || (x.f.Title && x.f.Title === S.visit.sifra)); if (!it) return false;
-  if (S.visit.id !== it.id) { const old = S.visit.id; S.visit.id = it.id; if (S.day && S.day.visits) S.day.visits.forEach(v => { if (v.id === old) v.id = it.id; }); saveDay(); } // stara poseta sa privremenom šifrom
+  if (!sameDay(S.visit.start)) return false; // stara poseta: zatvara se pri početku dana
+  const it = visitItem(); if (!it) return false;
   S.cur = it; go('kartica'); toast('Nastavljaš posetu: ' + S.visit.n); return true;
 }
 async function boot() {
