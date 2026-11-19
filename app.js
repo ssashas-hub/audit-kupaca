@@ -921,7 +921,12 @@ function resumeVisit() {
 }
 async function boot() {
   history.replaceState({ v: 'danas' }, '');
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    // nova verzija aplikacije: odmah je aktiviraj i jednom osveži stranicu (osim usred unosa)
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloaded || ['audit', 'novi', 'beleska', 'krajposete'].includes(S.view)) return; reloaded = true; location.reload(); });
+    navigator.serviceWorker.register('sw.js').then(r => { const skip = () => r.waiting && r.waiting.postMessage('skip'); skip(); r.addEventListener('updatefound', () => { const n = r.installing; n && n.addEventListener('statechange', () => { if (n.state === 'installed') skip(); }); }); r.update().catch(() => {}); }).catch(() => {});
+  }
   if (DEMO) { S.items = demoItems(); S.view = 'danas'; resumeVisit() || render(); return; }
   try { await initAuth(); } catch (e) { $app.innerHTML = `<div class="login"><h1>Greška pri prijavi</h1><p class="s">${esc(e.message)}</p></div>`; return; }
   if (!S.account) { S.view = 'login'; render(); return; }
