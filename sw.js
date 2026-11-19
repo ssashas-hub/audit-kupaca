@@ -1,5 +1,5 @@
 // Čuva aplikaciju u telefonu da se otvara i bez mreže.
-const V = 'ak-v1';
+const V = 'ak-v2';
 const FILES = ['./', './index.html', './app.css', './app.js', './config.js', './manifest.webmanifest', './icon.svg',
   'https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
@@ -9,5 +9,5 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   if (u.hostname.endsWith('microsoft.com') || u.hostname.endsWith('microsoftonline.com') || u.hostname.endsWith('sharepoint.com')) return;
   // prvo mreža (da stigne nova verzija), pa keš ako nema mreže
-  e.respondWith(fetch(e.request).then(r => { const cp = r.clone(); caches.open(V).then(c => c.put(e.request, cp)); return r; }).catch(() => caches.match(e.request, { ignoreSearch: true })));
+  e.respondWith(fetch(e.request, { cache: 'no-cache' }).then(r => { const cp = r.clone(); caches.open(V).then(c => c.put(e.request, cp)); return r; }).catch(() => caches.match(e.request, { ignoreSearch: true })));
 });
