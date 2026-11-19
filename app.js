@@ -1340,7 +1340,7 @@ async function notifyTeams(za, text) {
       if (!m.ok) { delete chats[r]; localStorage.setItem('ak_chats_v1', JSON.stringify(chats)); throw new Error('msg ' + m.status); }
     } catch (e) {
       // rezerva: mejl
-      try { await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: H, body: JSON.stringify({ message: { subject: 'Audit kupaca: ' + text.slice(0, 80), body: { contentType: 'HTML', content: html }, toRecipients: [{ emailAddress: { address: r } }] }, saveToSentItems: false }) }); } catch (e2) { console.warn('notify', r, e, e2); }
+      try { await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: H, body: JSON.stringify({ message: { subject: 'Audit kupaca: ' + text.slice(0, 80), body: { contentType: 'HTML', content: ROLES[r] === 'mag' ? `${esc(text)}<br><br>Odgovorite na ovaj mejl, odgovor stiže direktno pošiljaocu.` : html }, toRecipients: [{ emailAddress: { address: r } }] }, saveToSentItems: false }) }); } catch (e2) { console.warn('notify', r, e, e2); }
     }
   }
 }

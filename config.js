@@ -19,7 +19,7 @@ window.APP_CONFIG = {
     'petarjovanovic@ekoline.rs': 'kom',
     'goca@ekolineks.onmicrosoft.com': 'op',
     'tamara@ekolineks.onmicrosoft.com': 'op',
-    'magacin-mig@ekoline.rs': 'mag'
+    'magacin@ekoline.rs': 'mag'   // nema licencu: ne prijavljuje se, poruke mu idu na mejl
   },
   names: {
     'sasa@ekolineks.onmicrosoft.com': 'Aleksandar',
@@ -27,7 +27,7 @@ window.APP_CONFIG = {
     'petarjovanovic@ekoline.rs': 'Petar',
     'goca@ekolineks.onmicrosoft.com': 'Goca',
     'tamara@ekolineks.onmicrosoft.com': 'Tamara',
-    'magacin-mig@ekoline.rs': 'Magacin'
+    'magacin@ekoline.rs': 'Magacin'
   },
   defaultRole: 'op',   // nalog koji nije na spisku vidi aplikaciju kao call centar (ne kao komercijalista)
   reportTo: 'aleksandarmilojevic@ekoline.rs'   // kome ide dnevni izveštaj na kraju dana
