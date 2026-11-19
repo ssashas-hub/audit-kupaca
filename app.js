@@ -299,7 +299,8 @@ async function visitStart() {
   if (S.visit) { toast('Već je u toku poseta kod: ' + S.visit.n); return; }
   S.busy = true; render();
   try {
-    const home = parseLoc(it.f.Lokacija); let d = null, p, mapped = false;
+    let home = parseLoc(it.f.Lokacija), d = null, p, mapped = false;
+    if (home) { const tp0 = await townPos(it.f.field_4); if (tp0 && dist(home, tp0) > TOWNKM * 1000) home = null; } // tačka daleko od mesta kupca = pogrešno mapirano, mapira se ponovo
     if (home) {
       p = await getPos();
       if (p.acc > MAXACC) throw new Error(`GPS je neprecizan (±${p.acc} m). Sačekaj malo ili izađi napolje, pa pokušaj ponovo.`);

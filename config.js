@@ -8,7 +8,7 @@ window.APP_CONFIG = {
   listName: 'Lične karte kupaca',
   photoFolder: 'Fotografije kupaca',
   logList: 'Dnevnik rada',
-  visitRadius: 200,   // metara: koliko daleko od objekta sme da se započne poseta
-  maxAccuracy: 150    // metara: lošija GPS tačnost se ne prihvata
-
+  visitRadius: 50,    // metara: krug oko objekta (dodaje se trenutna GPS preciznost)
+  maxAccuracy: 100,   // metara: lošija GPS preciznost se ne prihvata za početak posete
+  mapAccuracy: 10     // metara: potrebna preciznost kada se objekat prvi put mapira (ispred ulaza)
 };
