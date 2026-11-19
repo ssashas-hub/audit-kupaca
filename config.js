@@ -10,5 +10,6 @@ window.APP_CONFIG = {
   logList: 'Dnevnik rada',
   visitRadius: 50,    // metara: krug oko objekta (dodaje se trenutna GPS preciznost)
   maxAccuracy: 100,   // metara: lošija GPS preciznost se ne prihvata za početak posete
+  allowNoGps: true,  // PROBA: kad GPS ne uspe, nudi „Nastavi bez GPS-a” (beleži se u Dnevnik rada). Za pravi rad staviti false.
   mapAccuracy: 10     // metara: potrebna preciznost kada se objekat prvi put mapira (ispred ulaza)
 };

@@ -273,6 +273,25 @@ function vKraj() {
     <div class="err" id="err"></div>
   </main><div class="foot"><div class="in"><button class="btn pri" data-a="dayend" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Tražim lokaciju…' : 'Završi radni dan'}</button></div></div>`;
 }
+// za probu: kad GPS ne uspe, nudi se nastavak bez GPS-a (beleži se u dnevnik)
+function gpsFail(msg, what) {
+  S.gpsErr = msg;
+  const el = document.getElementById('err'); if (!el) { toast(msg); return; }
+  el.innerHTML = esc(msg) + (C.allowNoGps ? `<button class="btn" style="width:100%;margin-top:12px" data-a="nogps" data-v="${what}">Nastavi bez GPS-a</button>` : '');
+}
+async function noGps(what) {
+  const why = 'BEZ GPS-a: ' + (S.gpsErr || 'preskočeno');
+  if (what === 'day') {
+    S.day = { date: new Date().toLocaleDateString('sr-RS'), start: new Date().toISOString(), visits: [], noGps: true };
+    saveDay(); await logEvent('POČETAK DANA', null, null, { Napomena: why });
+    S.view = 'tereni'; render(); toast('Radni dan je počeo bez GPS-a.');
+  } else if (what === 'visit') {
+    if (S.visit) return;
+    beginVisit(S.cur); S.visit.noGps = true; saveDay();
+    await logEvent('POČETAK POSETE', null, S.cur, { Napomena: why });
+    render(); toast('Poseta je počela bez GPS-a.');
+  } else if (what === 'novi') await saveNovi(true);
+}
 async function dayStart() {
   S.busy = true; render();
   try {
@@ -280,7 +299,7 @@ async function dayStart() {
     S.day = { date: new Date().toLocaleDateString('sr-RS'), start: new Date().toISOString(), visits: [] };
     saveDay(); await logEvent('POČETAK DANA', p, null);
     S.busy = false; S.view = 'tereni'; render(); toast('Radni dan je počeo u ' + hhmm(S.day.start) + '.');
-  } catch (e) { S.busy = false; render(); document.getElementById('err').textContent = e.message; }
+  } catch (e) { S.busy = false; render(); gpsFail(e.message, 'day'); }
 }
 async function dayEnd() {
   if (S.visit) { toast('Prvo završi posetu u toku.'); return; }
@@ -323,7 +342,7 @@ async function visitStart() {
     beginVisit(it, p);
     await logEvent('POČETAK POSETE', p, it, Object.assign(d !== null ? { Udaljenost: d } : {}, mapped ? { Napomena: home ? 'lokacija objekta preciznije zabeležena' : 'prva poseta: lokacija objekta zabeležena' + (S.townUnchecked ? ' (mesto nije provereno – nema mreže)' : '') } : {})); S.townUnchecked = false;
     S.busy = false; render(); toast(home ? 'Poseta je počela.' : 'Poseta je počela. Lokacija objekta je zabeležena.');
-  } catch (e) { S.busy = false; S.busyMsg = ''; render(); const el = document.getElementById('err'); if (el) el.textContent = e.message; else toast(e.message); }
+  } catch (e) { S.busy = false; S.busyMsg = ''; render(); gpsFail(e.message, 'visit'); }
 }
 const VISH = ['obavljen razgovor', 'urađen audit', 'primljena porudžbina', 'kupac nije bio tu', 'objekat zatvoren', 'ostalo'];
 function vKrajPosete() {
@@ -553,23 +572,25 @@ function vNovi() {
     <div class="err" id="err"></div>
   </main><div class="foot"><div class="in"><button class="btn pri" data-a="novisave">Upiši i pokreni audit</button></div></div>`;
 }
-async function saveNovi() {
+async function saveNovi(skipGps) {
   const v = id => document.getElementById(id).value.trim();
   if (!v('n_naziv')) { document.getElementById('err').textContent = 'Upiši naziv radnje.'; return; }
   const now = new Date(), code = 'NOVO-' + now.toISOString().slice(2, 16).replace(/\D/g, '');
   const fields = { Title: code, field_1: v('n_naziv'), field_3: v('n_adresa'), field_4: v('n_mesto'), field_5: v('n_tel'), field_7: v('n_kontakt'), StatusNovi: 'potencijalni' };
   if (S.teren && S.teren !== '*' && S.teren !== 'Bez terena') fields.AuditTeren = S.teren;
   if (S.visit) { document.getElementById('err').textContent = 'Prvo završi posetu kod: ' + S.visit.n; return; }
-  const btn = document.querySelector('[data-a=novisave]'), er = document.getElementById('err'); let p;
+  const btn = document.querySelector('[data-a=novisave]'), er = document.getElementById('err'); let p = null;
+  if (!skipGps) {
   btn.disabled = true; btn.textContent = 'Stani ispred ulaza, napolju · tražim signal…'; er.textContent = '';
   try { p = await getPrecise(a => { btn.textContent = `Stani ispred ulaza, napolju · ±${a} m${a <= MAPACC ? ' ✓' : '…'}`; }); }
-  catch (e) { er.textContent = e.message; btn.disabled = false; btn.textContent = 'Upiši i pokreni audit'; return; }
+  catch (e) { btn.disabled = false; btn.textContent = 'Upiši i pokreni audit'; gpsFail(e.message, 'novi'); return; }
   fields.Lokacija = fmtLoc(p);
+  }
   const it = { id: 'tmp' + now.getTime(), f: { ...fields } };
   S.items.push(it); saveItems();
   await queue({ type: 'create', tmp: it.id, fields });
   S.cur = it; beginVisit(it, p);
-  await logEvent('POČETAK POSETE', p, it, { Napomena: 'nov kupac: lokacija objekta zabeležena' });
+  await logEvent('POČETAK POSETE', p, it, { Napomena: p ? 'nov kupac: lokacija objekta zabeležena' : 'nov kupac, BEZ GPS-a: ' + (S.gpsErr || '') });
   history.replaceState({ v: 'kartica' }, ''); S.view = 'kartica'; startAudit();
 }
 
@@ -605,6 +626,7 @@ document.addEventListener('click', async e => {
     case 'visit': await visitStart(); break;
     case 'govisit': S.cur = S.items.find(x => x.id === S.visit.id) || S.cur; go('kartica'); break;
     case 'endvisit': S.vk = null; go('krajposete'); break;
+    case 'nogps': await noGps(v); break;
     case 'startnew': startAudit(true); break;
     case 'vish': S.vk.b = document.getElementById('vkb').value; S.vk.i = S.vk.i === v ? '' : v; rerender(); break;
     case 'endvisitsave': await visitEnd(); break;
