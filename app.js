@@ -413,7 +413,7 @@ function bar(title, back) {
 function saveDraft() { if (S.visit && S.d && S.view === 'audit' && S.cur && S.cur.id === S.visit.id) { S.visit.draft = { d: S.d, step: S.step }; saveDay(); } }
 function render() {
   saveDraft(); if (S.visit) visitItem();
-  let v = { tiketi: vTiketi, tiket: vTiket, poruke: vPoruke, thread: vThread, nedelja: vNedelja, mapa: vMapa, pin: vPin, aktivnost: vAktivnost, nadzor: vNadzor, admin: vAdmin, danas: vDanas, vise: vVise, beleska: vBeleska, tereni: vTereni, kupci: vKupci, kartica: vKartica, audit: vAudit, novi: vNovi, login: vLogin, kraj: vKraj, krajposete: vKrajPosete }[S.view] || vTereni;
+  let v = { narudzba: vNarudzba, tiketi: vTiketi, tiket: vTiket, poruke: vPoruke, thread: vThread, nedelja: vNedelja, mapa: vMapa, pin: vPin, aktivnost: vAktivnost, nadzor: vNadzor, admin: vAdmin, danas: vDanas, vise: vVise, beleska: vBeleska, tereni: vTereni, kupci: vKupci, kartica: vKartica, audit: vAudit, novi: vNovi, login: vLogin, kraj: vKraj, krajposete: vKrajPosete }[S.view] || vTereni;
   if (S.view !== 'login' && isKom()) { if (dayOpenOld() && !(S.visit && sameDay(S.visit.start))) v = vJuce; else if (!dayOn() && !(S.visit && sameDay(S.visit.start))) v = vDan; }
   $app.innerHTML = (DEMO ? '<div class="demo">Probni režim – izmišljeni kupci, ništa se ne šalje</div>' : '') + v();
   document.body.classList.toggle('tabs-on', !!document.querySelector('.tabs'));
@@ -659,7 +659,7 @@ function vVise() {
     ${modOn('ods') && isKom() ? `<button class="btn" style="width:100%;margin-top:10px" data-a="newods">🏖 Prijavi odsustvo</button>${S.X.ods.filter(o => (o.f.Korisnik || '').toLowerCase() === me() && o.f.Do >= ymd()).map(o => `<div class="s" style="margin:6px 2px">${esc(o.f.Vrsta)} ${fmtDate(o.f.Od)}–${fmtDate(o.f.Do)} · ${esc(o.f.Status)}</div>`).join('')}` : ''}
     <div class="s" style="margin:12px 2px">Uloga: ${esc(ROLE_N[role()] || role())}</div>
     <button class="btn" style="width:100%;margin-top:10px" data-a="logout">Odjava</button>
-    <p class="s" style="text-align:center;margin-top:18px">Audit kupaca · verzija 19.11.2026</p>
+    <p class="s" style="text-align:center;margin-top:18px">Audit kupaca · verzija 19.11.2026 · narudžbine</p>
   </main>` + tabs('vise');
 }
 function vBeleska() {
@@ -812,6 +812,7 @@ function vKartica() {
     </div>
     ${pjBlock(it)}
     <div class="kact">
+      ${modOn('nar') && modOn('tik') ? `<button data-a="kord"><span>🛒</span>Narudžbina${ordLoad()[it.id] && Object.keys(ordLoad()[it.id].q || {}).length ? ' <b class="tb">●</b>' : ''}</button>` : ''}
       ${modOn('plan') ? `<button data-a="kplan"><span>📅</span>U plan</button>` : ''}
       ${modOn('zad') ? `<button data-a="ktask"><span>✅</span>Zadatak</button>` : ''}
       ${modOn('por') ? `<button data-a="kmsg"><span>💬</span>Poruka${(() => { const n = S.X.por.filter(m => m.f.KupacSifra === String(f.Title) && unread(m)).length; return n ? ` <b class="tb">${n}</b>` : ''; })()}</button>` : ''}
@@ -1015,6 +1016,13 @@ document.addEventListener('click', async e => {
     case 'tktoggle': S.tkOpen = !S.tkOpen; rerender(); break;
     case 'thread': openThread(v); break;
     case 'tikf': S.tikF = v; rerender(); break;
+    case 'kord': openOrder(S.cur); break;
+    case 'otip': S.ord.tip = v; ordSave(); render(); scrollTo(0, 0); break;
+    case 'otipch': S.ord.tip = ''; ordSave(); render(); break;
+    case 'otab': S.ord.tab = v; if (v === 'obicno') { S.ord.s = ''; S.ord.kat = ''; } ordSave(); render(); scrollTo(0, 0); break;
+    case 'oq': { const a = S.SY.artikli.art[v], cur = num(S.ord.q[v]); const st = el.dataset.k === 'tp' ? (a.tp || 1) : ordStep(a) * num(el.dataset.k); ordSetQ(v, cur + st); ordRefresh(); break; }
+    case 'oclear': if (await askSure('Obriši narudžbinu', '<p>Brišu se sve količine iz ove narudžbine.</p>', 'Obriši')) { S.ord.q = {}; ordSave(); render(); } break;
+    case 'osend': await ordSend(); break;
     case 'tiket': S.tikId = v; go('tiket'); break;
     case 'mojitik': S.tikF = 'svi'; go('tiketi'); break;
     case 'tikpre': await tikAct('pre'); break;
@@ -1088,6 +1096,9 @@ document.addEventListener('input', e => {
   const k = e.target.dataset.i; if (!k) return;
   if (k === 'pq') { S.pq = e.target.value; const y = scrollY; render(); const i = document.querySelector('[data-i=pq]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } scrollTo(0, y); return; }
   if (k === 'msgtxt') { S.msgTxt = e.target.value; return; }
+  if (k === 'ordq' && S.ord) { S.ord.s = e.target.value; if (S.ord.tab === 'korpa') S.ord.tab = 'sve'; ordSave(); ordRefresh(); return; }
+  if (k === 'ordkat' && S.ord) { S.ord.kat = e.target.value; if (S.ord.tab !== 'sve') S.ord.tab = 'sve'; ordSave(); ordRefresh(); return; }
+  if (k.startsWith('oq_') && S.ord) { ordSetQ(k.slice(3), e.target.value); const t = ordTotal(S.cur), f = document.querySelector('.foot .grow'); if (f) f.innerHTML = `<b>${din(t.sum)}</b><div class="s">${t.n} artikala · bez PDV</div>`; const b = document.querySelector('[data-a=osend]'); if (b) b.disabled = !t.n; return; }
   if (k === 'planuser') { S.planUser = e.target.value; render(); return; }
   if (k.startsWith('kdt_')) { const x = S.kd[k.slice(4)]; if (x) x.t = e.target.value; return; }
   if (k === 'dq') { S.dq = e.target.value; S.showAll = false; const l = document.getElementById('dlist'); if (l) l.innerHTML = danasList(); else { render(); const i = document.querySelector('[data-i=dq]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } } return; }
@@ -1145,7 +1156,7 @@ const dLabel = s => { const t = ymd(); if (s === t) return 'danas'; if (s === ad
 const DOW = ['nedelja', 'ponedeljak', 'utorak', 'sreda', 'četvrtak', 'petak', 'subota'];
 
 /* ---------- podaci iz BizniSoft-a (folder Sinhronizacija, puni ga program na serveru) ---------- */
-const SYNC_FILES = ['finansije', 'promet', 'dokumenta', 'stavke', 'kupci', 'stanje'];
+const SYNC_FILES = ['finansije', 'promet', 'dokumenta', 'stavke', 'kupci', 'stanje', 'artikli', 'zalihe'];
 S.SY = {}; S.SYtag = {};
 try { S.SYtag = JSON.parse(localStorage.getItem('ak_sytag_v1') || '{}'); } catch (e) { }
 async function syncLoadCache() {
@@ -1334,7 +1345,7 @@ async function notifyTeams(za, text) {
 }
 /* ---------- podešavanja (admin) ---------- */
 const DEF_SET = {
-  moduli: { '*': { fin: 1, plan: 1, zad: 1, por: 1, konk: 1, pot: 1, ods: 1, mapa: 1, tik: 1 } },
+  moduli: { '*': { fin: 1, plan: 1, zad: 1, por: 1, konk: 1, pot: 1, ods: 1, mapa: 1, tik: 1, nar: 1 } },
   podsetnik: '17:30',
   konkurenti: ['Špajz', 'Viva', 'Macrobiotic', 'NS COM', 'Mrvica'],
   praznici: ['2026-01-01', '2026-01-02', '2026-01-07', '2026-02-16', '2026-02-17', '2026-04-10', '2026-04-11', '2026-04-12', '2026-04-13', '2026-05-01', '2026-05-02', '2026-11-11', '2027-01-01', '2027-01-02', '2027-01-07', '2027-02-15', '2027-02-16', '2027-04-30', '2027-05-01', '2027-05-02', '2027-05-03', '2027-05-04', '2027-11-11'],
@@ -1347,7 +1358,7 @@ const DEF_SET = {
   razlozi: ['nije stigao, nestalo vremena', 'kupac zatvoren ili odsutan', 'promena plana, hitno drugo', 'kupac otkazao ili tražio drugi termin', 'put ili vreme', 'ostalo'],
   vrsteOdsustva: ['godišnji odmor', 'bolovanje', 'slobodan dan', 'službeno drugde', 'ostalo'],
   predlogBroj: 12,
-  sinhronizacija: { kupci: 60, promet: 60, dokumenta: 30, finansije: 30, stavke: 1440, od: 7, do: 19, nocu: 2 },
+  sinhronizacija: { kupci: 60, promet: 60, dokumenta: 30, finansije: 30, stavke: 1440, artikli: 60, zalihe: 30, od: 7, do: 19, nocu: 2 },
   kpi: { posetaDnevno: null, postovanjePlana: null, primarniZadaci: null },
   pragoviPotencijala: { 1: '', 2: '', 3: '', 4: '', 5: '' }
 };
@@ -1360,7 +1371,7 @@ function putSet(k, v) {
   const it = S.X.pod.find(x => x.f.Title === k), val = JSON.stringify(v);
   if (it) xSet('pod', it, { Vrednost: val, Izmenio: me() }); else xAdd('pod', { Title: k, Vrednost: val, Izmenio: me() });
 }
-const MODS = [['fin', 'Finansije i dokumenta'], ['plan', 'Planiranje'], ['zad', 'Zadaci'], ['por', 'Poruke'], ['konk', 'Konkurencija'], ['pot', 'Potencijal 1–5'], ['ods', 'Odsustva'], ['mapa', 'Mapa i ruta'], ['tik', 'Tiketi za BizniSoft']];
+const MODS = [['fin', 'Finansije i dokumenta'], ['plan', 'Planiranje'], ['zad', 'Zadaci'], ['por', 'Poruke'], ['konk', 'Konkurencija'], ['pot', 'Potencijal 1–5'], ['ods', 'Odsustva'], ['mapa', 'Mapa i ruta'], ['tik', 'Tiketi za BizniSoft'], ['nar', 'Narudžbine']];
 function modOn(m, user) {
   const s = getSet('moduli'), u = (user || me()).toLowerCase();
   const v = s[u] && m in s[u] ? s[u][m] : s['*'] && m in s['*'] ? s['*'][m] : 1;
@@ -1635,7 +1646,7 @@ function msgToTask(id) {
 
 /* ---------- tiketi za BizniSoft ---------- */
 const TIK_ST = { novo: ['Novo', 'warn'], preuzet: ['Preuzet', 'brand'], resen: ['Rešen', 'ok'] };
-const tikRows = t => { try { return JSON.parse(t.f.Izmene || '[]'); } catch (e) { return []; } };
+const tikRows = t => { try { const x = JSON.parse(t.f.Izmene || '[]'); return Array.isArray(x) ? x : []; } catch (e) { return []; } };
 const tikNew = () => modOn('tik') ? S.X.tik.filter(t => t.f.Status === 'novo').length : 0;
 const daySet = s => new Set((Array.isArray(s) ? s : String(s || '').split(',')).map(x => norm(x)).filter(Boolean));
 const sameSet = (a, b) => a.size === b.size && [...a].every(x => b.has(x));
@@ -1666,6 +1677,7 @@ function tikFromAudit(it, d) {
   xAdd('tik', { Title: 'Izmena: ' + rows.map(x => x[0]).join(', '), Vrsta: 'izmena', KupacSifra: k, KupacNaziv: f.field_1 || '', Izmene: JSON.stringify(rows), Autor: me(), Vreme: new Date().toISOString(), Status: 'novo' });
 }
 function tikCheck(t) {
+  if (t.f.Vrsta === 'narudzba') return t.f.Status === 'resen' ? ordCheck(t) : '';
   if (t.f.Status !== 'resen' || !S.SY.kupci) return '';
   if (t.f.Vrsta === 'novi') { const s = t.f.BSSifra; if (!s) return ''; const ok = S.SY.kupci.kupci.some(x => String(x.s) === String(Number(s))); return ok ? '<span class="badge ok">✓ vidi se u BS</span>' : '<span class="badge bad">⚠ nije vidljivo u BS</span>'; }
   const it = itemBySifra(t.f.KupacSifra); if (!it) return '';
@@ -1692,15 +1704,15 @@ function vTiket() {
   const t = S.X.tik.find(x => x.id === S.tikId); if (!t) return bar('Tiket', true) + '<main class="main"><div class="empty">Tiket nije pronađen.</div></main>';
   const f = t.f, s = TIK_ST[f.Status] || ['?', ''], it = itemBySifra(f.KupacSifra), mine = (f.Preuzeo || '').toLowerCase() === me(), can = !isKom() || isAdmin();
   const wait = (a, b) => { if (!a || !b) return ''; const m = Math.round((Date.parse(b) - Date.parse(a)) / 60000); return m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' d'; };
-  return bar(f.Vrsta === 'novi' ? 'Tiket · nov kupac' : 'Tiket · izmena', true) + `<main class="main">
+  return bar(f.Vrsta === 'novi' ? 'Tiket · nov kupac' : f.Vrsta === 'narudzba' ? 'Tiket · narudžbina' : 'Tiket · izmena', true) + `<main class="main">
     <div class="t">${esc(f.KupacNaziv || f.KupacSifra)}</div><div class="s">šifra u aplikaciji: ${esc(f.KupacSifra)}${it && it.f.Centrala ? ` · poslovna jedinica ${esc(it.f.PJ)} centrale ${esc(it.f.Centrala)}` : ''}</div>
     ${it ? `<button class="lnk" data-a="kupac" data-v="${esc(it.id)}">› Otvori karticu kupca</button>` : ''}
-    <div class="card"><table class="tbl"><tr><th>Polje</th><th>U BizniSoft-u</th><th>Treba da bude</th></tr>${tikRows(t).map(r => `<tr><td><b>${esc(r[0])}</b></td><td class="s">${esc(r[1] || '—')}</td><td>${esc(r[2] || '')}</td></tr>`).join('')}</table></div>
+    ${f.Vrsta === 'narudzba' ? ordTikHtml(t) : `<div class="card"><table class="tbl"><tr><th>Polje</th><th>U BizniSoft-u</th><th>Treba da bude</th></tr>${tikRows(t).map(r => `<tr><td><b>${esc(r[0])}</b></td><td class="s">${esc(r[1] || '—')}</td><td>${esc(r[2] || '')}</td></tr>`).join('')}</table></div>`}
     <div class="card"><dl class="kv"><dt>Status</dt><dd><span class="badge ${s[1]}">${s[0]}</span> ${tikCheck(t)}</dd>
       <dt>Napravio</dt><dd>${esc(nameOf(f.Autor))} · ${fmtDate(f.Vreme)} ${hhmm(f.Vreme)}</dd>
       ${f.Preuzeo ? `<dt>Preuzeo</dt><dd>${esc(nameOf(f.Preuzeo))} · ${fmtDate(f.Preuzeto)} ${hhmm(f.Preuzeto)} <span class="s">(čekao ${wait(f.Vreme, f.Preuzeto)})</span></dd>` : ''}
       ${f.Resio ? `<dt>Rešio</dt><dd>${esc(nameOf(f.Resio))} · ${fmtDate(f.Reseno)} ${hhmm(f.Reseno)} <span class="s">(rešavanje ${wait(f.Preuzeto || f.Vreme, f.Reseno)})</span></dd>` : ''}
-      ${f.BSSifra ? `<dt>Šifra u BS</dt><dd>${esc(f.BSSifra)}</dd>` : ''}
+      ${f.BSSifra ? `<dt>${f.Vrsta === 'narudzba' ? 'Broj NK' : 'Šifra u BS'}</dt><dd>${esc(f.BSSifra)}</dd>` : ''}
       ${f.Komentar ? `<dt>Komentar</dt><dd>${esc(f.Komentar)}</dd>` : ''}</dl></div>
     <button class="btn" style="width:100%" data-a="tikaut">💬 Piši autoru (${esc(nameOf(f.Autor))})</button>
   </main>${can && f.Status !== 'resen' ? `<div class="foot"><div class="in">${f.Status === 'novo' ? '<button class="btn pri" data-a="tikpre">Preuzmi</button>' : `${mine ? '<button class="btn" data-a="tikvrati">Vrati</button>' : `<span class="s grow">Preuzeo ${esc(nameOf(f.Preuzeo))}</span>`}<button class="btn pri" style="flex:2" data-a="tikres">Rešeno</button>`}</div></div>` : ''}`;
@@ -1713,6 +1725,11 @@ async function tikAct(a) {
   if (a === 'res') {
     const fx = { Status: 'resen', Resio: me(), Reseno: now };
     if (t.f.Status === 'novo') { fx.Preuzeo = me(); fx.Preuzeto = now; }
+    if (t.f.Vrsta === 'narudzba') {
+      const nk = String(await askText('Broj narudžbine (NK) u BizniSoft-u', 'npr. NK400009600', t.f.BSSifra || '') || '').trim().toUpperCase();
+      if (!nk) return;
+      fx.BSSifra = /^\d+$/.test(nk) ? 'NK400' + nk.padStart(6, '0') : nk;
+    }
     if (t.f.Vrsta === 'novi') {
       const s = String(await askText('Šifra kupca u BizniSoft-u', 'npr. 3721', t.f.BSSifra || '') || '').trim();
       if (!s) return;
@@ -1722,7 +1739,7 @@ async function tikAct(a) {
     const c = await askText('Komentar (nije obavezno)', 'npr. uneto, promenjen i drugi telefon', t.f.Komentar || '');
     if (c === null) return;
     if (String(c).trim()) fx.Komentar = String(c).trim();
-    if (fx.BSSifra) {
+    if (fx.BSSifra && t.f.Vrsta === 'novi') {
       const s = fx.BSSifra, it = itemBySifra(t.f.KupacSifra), dup = S.items.find(x => String(x.f.Title) === s);
       if (it && !dup) { it.f.Title = s; saveItems(); await queue({ type: 'patch', itemId: it.id, fields: { Title: s } }); fx.KupacSifra = s; }
       else if (dup) toast('Kupac ' + s + ' već postoji u aplikaciji, pa NOVO zapis nije preimenovan.');
@@ -1730,6 +1747,151 @@ async function tikAct(a) {
     xSet('tik', t, fx); toast('Tiket je rešen.');
   }
   render();
+}
+
+/* ---------- narudžbine ---------- */
+const din = n => (Math.round(num(n) * 100) / 100).toLocaleString('sr-RS', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const qfmt = n => (Math.round(num(n) * 1000) / 1000).toLocaleString('sr-RS');
+const LS_ORD = 'ak_ord_v1';
+function artIdx() {
+  const A = S.SY.artikli; if (!A) return null;
+  if (S.SY._ai && S.SY._ai.gen === A.gen) return S.SY._ai;
+  const cen = {}, aat = {};
+  (A.cen || []).forEach(r => { ((cen[r.c] = cen[r.c] || {})[r.a] = cen[r.c][r.a] || []).push(r); });
+  Object.entries(A.artatr || {}).forEach(([t, L]) => (L || []).forEach(s => { (aat[s] = aat[s] || new Set()).add(Number(t)); }));
+  const kats = [...new Set(Object.values(A.art).map(a => (a.kat || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'sr'));
+  return S.SY._ai = { gen: A.gen, cen, aat, kats };
+}
+const dateOk = (r, d) => (!r.od || String(r.od).slice(0, 10) <= d) && (!r.dd || String(r.dd).slice(0, 10) >= d);
+function priceFor(kup, pj, sifra, tip) {
+  const A = S.SY.artikli, X = artIdx(); if (!A || !X) return null;
+  const d = ymd(), k = Number(kup), s = Number(sifra), ki = (A.kup || {})[String(k)] || {};
+  const pick = n => { const R = ((X.cen[n] || {})[s] || []).filter(r => dateOk(r, d) && (!r.p || r.p === k) && (!r.pj || r.pj === Number(pj))); R.sort((a, b) => ((b.p ? 2 : 0) + (b.pj ? 1 : 0)) - ((a.p ? 2 : 0) + (a.pj ? 1 : 0))); return R.length ? R[0].v : 0; };
+  const base = pick(ki.c || 'CENOVNIK') || pick('CENOVNIK');
+  const katr = new Set((A.kupatr || {})[String(k)] || []), aatr = X.aat[s] || new Set();
+  const ak = (A.akc || []).filter(x => dateOk(x, d) && (x.a === s || (!x.a && x.aa && aatr.has(x.aa))) && (!x.k || x.k === k) && (!x.ka || katr.has(x.ka)));
+  const fx = ak.filter(x => x.c > 0).sort((a, b) => (!!b.k - !!a.k) || (!!b.a - !!a.a) || (a.pr - b.pr));
+  if (fx.length) return { base, cena: fx[0].c, rab: 0, neto: fx[0].c, akc: fx[0].n || 'akcija' };
+  const ar = ak.filter(x => x.r > 0 && !(x.c > 0)).sort((a, b) => (!!b.k - !!a.k) || (!!b.a - !!a.a));
+  let rab = 0, izvor = '';
+  if (ar.length) { rab = ar[0].r; izvor = ar[0].n || 'akcija'; }
+  else {
+    const U = (A.usl || []).filter(u => dateOk(u, d) && (u.k || u.ka) && (!u.k || u.k === k) && (!u.ka || katr.has(u.ka)) && (!u.a || u.a === s) && (!u.aa || aatr.has(u.aa)) && (!u.d || u.d === tip));
+    U.sort((a, b) => ((b.k ? 8 : 0) + (b.a ? 4 : b.aa ? 2 : 0) + (b.d ? 1 : 0)) - ((a.k ? 8 : 0) + (a.a ? 4 : a.aa ? 2 : 0) + (a.d ? 1 : 0)));
+    if (U.length) { rab = U[0].r; izvor = U[0].k ? 'lični rabat' : 'rabat kategorije'; }
+    else if (ki.r) { rab = ki.r; izvor = 'rabat kupca'; }
+  }
+  return { base, cena: base, rab, neto: base * (1 - rab / 100), akc: ar.length ? izvor : '', izvor };
+}
+function ordKup(it) { return { k: Number(bsKey(it)), pj: it.f.Centrala ? num(it.f.PJ) : 0 }; }
+function ordLoad() { try { return JSON.parse(localStorage.getItem(LS_ORD) || '{}'); } catch (e) { return {}; } }
+function ordSave() { const all = ordLoad(); if (S.ord) { if (Object.keys(S.ord.q).length || S.ord.tip) all[S.ord.id] = S.ord; else delete all[S.ord.id]; } try { localStorage.setItem(LS_ORD, JSON.stringify(all)); } catch (e) { } }
+function openOrder(it) {
+  if (!S.SY.artikli) { toast('Artikli još nisu stigli iz BizniSoft-a. Osveži podatke kad bude mreže.'); return; }
+  if (!bsKey(it)) { toast('Kupac još nema BizniSoft šifru. Narudžbina se pravi kada bude unet u BizniSoft.'); return; }
+  S.ord = ordLoad()[it.id] || { id: it.id, tip: '', q: {}, s: '', kat: '', tab: 'obicno' };
+  S.cur = it; go('narudzba');
+}
+function ordUsual(it) {
+  const st = S.SY.stavke, L = st && st.k[bsKey(it)]; if (!L) return [];
+  return L.map(x => ({ s: String(x[0]), avg: x[4] ? x[1] / x[4] : x[1], z: x[3] })).filter(x => S.SY.artikli.art[x.s]);
+}
+function ordStep(a) { return a && a.kp > 0 ? a.kp : 1; }
+function ordRow(it, s, hint) {
+  const A = S.SY.artikli, a = A.art[s]; if (!a) return '';
+  const o = S.ord, k = ordKup(it), p = priceFor(k.k, k.pj, s, o.tip) || {}, q = num(o.q[s]);
+  const z = S.SY.zalihe && S.SY.zalihe.k[s], fr = z ? num(z.f) : null;
+  const pak = [a.kp > 0 ? `kom. pak. ${qfmt(a.kp)}${a.kpi ? ' ' + esc(a.kpi) : ''}` : '', a.tp > 0 ? `trans. pak. ${qfmt(a.tp)}${a.tpi ? ' ' + esc(a.tpi) : ''}` : ''].filter(Boolean).join(' · ');
+  const odd = q && a.kp > 1 && Math.abs(q / a.kp - Math.round(q / a.kp)) > 1e-6;
+  return `<div class="orow${q ? ' on' : ''}"><div class="grow">
+    <div class="t">${esc(a.n)}</div>
+    <div class="s">${esc(s)}${a.kat ? ' · ' + esc(a.kat) : ''} · ${esc(a.jm || '')}${pak ? ' · ' + pak : ''}</div>
+    <div class="s">${p.base ? (p.akc && p.rab === 0 ? `<span class="badge brand">${esc(p.akc)}</span> <b>${din(p.neto)}</b> <s>${din(p.base)}</s>` : `${din(p.cena)}${p.rab ? ` −${qfmt(p.rab)}% = <b>${din(p.neto)}</b>` : ''}${p.akc ? ` <span class="badge brand">${esc(p.akc)}</span>` : ''}`) : '<span class="late">nema cene</span>'}
+      · ${fr === null ? 'stanje —' : `<span class="${fr <= 0 || (q && q > fr) ? 'late' : ''}">slobodno ${qfmt(fr)}</span>`}${hint ? ' · ' + hint : ''}</div>
+    ${odd ? `<div class="s late">nije ceo broj kom. pakovanja (${qfmt(a.kp)})</div>` : ''}
+  </div><div class="qty"><button data-a="oq" data-v="${esc(s)}" data-k="-1">−</button><input type="number" inputmode="decimal" data-i="oq_${esc(s)}" value="${q || ''}" placeholder="0"><button data-a="oq" data-v="${esc(s)}" data-k="1">+</button>${a.tp > 0 ? `<button class="tp" data-a="oq" data-v="${esc(s)}" data-k="tp">+TP</button>` : ''}</div></div>`;
+}
+function ordTotal(it) {
+  const k = ordKup(it); let n = 0, sum = 0;
+  Object.entries(S.ord.q).forEach(([s, q]) => { if (num(q) > 0) { n++; const p = priceFor(k.k, k.pj, s, S.ord.tip); if (p) sum += p.neto * num(q); } });
+  return { n, sum };
+}
+function ordWarn(it) {
+  const f = finOf(it), b = bsKupac(it), w = [];
+  if (b && String(b.blok) === '1') w.push('Kupac je <b>blokiran</b> u BizniSoft-u.');
+  if (f && f.d > 0) w.push(`Kupac ima dospeli dug <b>${money(f.d)}</b>${f.m ? `, kasni najviše ${f.m} dana` : ''}.`);
+  return w;
+}
+function vNarudzba() {
+  const it = S.cur, o = S.ord; if (!it || !o) return vTereni();
+  const A = S.SY.artikli, X = artIdx(), k = ordKup(it), w = ordWarn(it);
+  if (!o.tip) {
+    const r = t => { const p = priceFor(k.k, k.pj, 0, t); return p ? p.rab : 0; };
+    return bar('Narudžbina', true) + `<main class="main">
+      <div class="t">${esc(it.f.field_1 || it.f.Title)}</div>${it.f.Centrala ? `<div class="s">poslovna jedinica · cene i rabat centrale ${esc(it.f.Centrala)}</div>` : ''}
+      ${w.length ? `<div class="card warnc">${w.join('<br>')}</div>` : ''}
+      <div class="sh" style="margin-top:12px">Kako kupac plaća ovu narudžbinu?</div>
+      <button class="big-act" style="width:100%;margin-bottom:10px" data-a="otip" data-v="OA"><span>📄</span>Na valutu (otpremnica) · rabat ${qfmt(r('OA'))}%</button>
+      <button class="big-act" style="width:100%" data-a="otip" data-v="PF"><span>💵</span>Plaća odmah (profaktura) · rabat ${qfmt(r('PF'))}%</button>
+      <p class="s">Rabat je iz uslova u BizniSoft-u. Na artiklima sa akcijskom cenom nema rabata.</p>
+    </main>`;
+  }
+  const us = ordUsual(it), qn = norm(o.s || '');
+  let list;
+  if (o.tab === 'korpa') list = Object.keys(o.q).filter(s => num(o.q[s]) > 0).map(s => ordRow(it, s));
+  else if (o.tab === 'obicno' && !qn && !o.kat) list = us.slice(0, 80).map(x => ordRow(it, x.s, `obično ${qfmt(Math.round(x.avg * 10) / 10)}`));
+  else {
+    const L = Object.entries(A.art).filter(([s, a]) => (!o.kat || (a.kat || '').trim() === o.kat) && (!qn || norm(a.n + ' ' + s + ' ' + (a.kat || '')).includes(qn)));
+    list = L.slice(0, 60).map(([s]) => ordRow(it, s)); if (L.length > 60) list.push(`<div class="s" style="margin:8px 2px">Prikazano 60 od ${L.length}. Suzi pretragu.</div>`);
+  }
+  const t = ordTotal(it), kc = Object.keys(o.q).filter(s => num(o.q[s]) > 0).length;
+  const zg = S.SY.zalihe ? S.SY.zalihe.gen : null;
+  return bar('Narudžbina · ' + (o.tip === 'PF' ? 'plaća odmah' : 'na valutu'), true) + `<main class="main">
+    <div class="t ell">${esc(it.f.field_1 || it.f.Title)}</div>
+    ${w.length ? `<div class="card warnc">${w.join('<br>')}</div>` : ''}
+    <div class="seg">${[['obicno', `Obično · ${us.length}`], ['sve', 'Svi artikli'], ['korpa', `Korpa · ${kc}`]].map(([v, n]) => `<button class="${o.tab === v ? 'on' : ''}" data-a="otab" data-v="${v}">${n}</button>`).join('')}</div>
+    ${o.tab !== 'korpa' ? `<div class="fsel srch"><span class="ic">🔍</span><input type="search" data-i="ordq" placeholder="Naziv, šifra ili katalog" value="${esc(o.s || '')}"></div>
+    <select class="dinp" data-i="ordkat"><option value="">Svi katalozi</option>${X.kats.map(c => `<option ${o.kat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>` : ''}
+    <div id="olist">${list.join('') || '<div class="empty">Nema artikala za prikaz.</div>'}</div>
+    <p class="s">Cene su bez PDV-a. Konačnu cenu računa BizniSoft pri unosu.${zg ? ` Stanje magacina 400 od ${fmtDate(zg)} ${hhmm(zg)}.` : ''} <button class="lnk" data-a="otipch">Promeni način plaćanja</button></p>
+  </main><div class="foot"><div class="in"><div class="grow"><b>${din(t.sum)}</b><div class="s">${t.n} artikala · bez PDV</div></div><button class="btn" data-a="oclear">Obriši</button><button class="btn pri" data-a="osend" ${t.n ? '' : 'disabled'}>Pošalji</button></div></div>`;
+}
+function ordSetQ(s, v) {
+  v = Math.max(0, Math.round(num(v) * 1000) / 1000);
+  if (v) S.ord.q[s] = v; else delete S.ord.q[s];
+  ordSave();
+}
+function ordRefresh() {
+  const y = scrollY, f = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.i;
+  render(); scrollTo(0, y);
+  if (f) { const i = document.querySelector(`[data-i="${f}"]`); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { } } }
+}
+async function ordSend() {
+  const it = S.cur, o = S.ord, k = ordKup(it), A = S.SY.artikli;
+  const L = Object.entries(o.q).filter(([, q]) => num(q) > 0).map(([s, q]) => { const p = priceFor(k.k, k.pj, s, o.tip) || {}; return [s, (A.art[s] || {}).n || s, num(q), Math.round((p.cena || 0) * 100) / 100, p.rab || 0, Math.round((p.neto || 0) * num(q) * 100) / 100, p.akc || '']; });
+  if (!L.length) return;
+  const sum = L.reduce((a, x) => a + x[5], 0), w = ordWarn(it);
+  const low = L.filter(x => { const z = S.SY.zalihe && S.SY.zalihe.k[x[0]]; return z && x[2] > num(z.f); });
+  if (!await askSure('Pošalji narudžbinu', `<p><b>${esc(it.f.field_1 || it.f.Title)}</b><br>${o.tip === 'PF' ? 'plaća odmah (PF)' : 'na valutu (OA)'} · ${L.length} artikala · <b>${din(sum)} din</b> bez PDV</p>${w.length ? `<p class="late">${w.join('<br>')}</p>` : ''}${low.length ? `<p class="late">Nema dovoljno na stanju: ${low.map(x => esc(x[1])).join(', ')}</p>` : ''}<p>Narudžbina ide operateru kao tiket i unosi se u BizniSoft.</p>`, 'Pošalji')) return;
+  const nap = await askText('Napomena uz narudžbinu (nije obavezno)', 'npr. isporuka u petak, pozvati pre dostave', '');
+  if (nap === null) return;
+  xAdd('tik', { Title: `Narudžbina · ${L.length} art · ${din(sum)} din`, Vrsta: 'narudzba', KupacSifra: String(it.f.Title), KupacNaziv: it.f.field_1 || '', Izmene: JSON.stringify({ tip: o.tip, kupac: k.k, pj: k.pj, l: L, iznos: Math.round(sum * 100) / 100, nap: String(nap || '').trim() }), Autor: me(), Vreme: new Date().toISOString(), Status: 'novo' });
+  await logEvent('NARUDŽBINA', null, it, { Napomena: `${o.tip} · ${L.length} art · ${din(sum)} din${nap ? ' · ' + String(nap).trim() : ''}` });
+  S.ord.q = {}; S.ord.tip = ''; ordSave(); S.ord = null;
+  toast('Narudžbina je poslata.'); history.back();
+}
+const ordOf = t => { try { const x = JSON.parse(t.f.Izmene || '{}'); return x && x.l ? x : null; } catch (e) { return null; } };
+function ordTikHtml(t) {
+  const x = ordOf(t); if (!x) return '';
+  return `<div class="card"><div class="s">${x.tip === 'PF' ? 'Plaća odmah · profaktura (PF)' : 'Na valutu · otpremnica (OA)'} · šifra kupca u BS: <b>${esc(x.kupac)}</b>${x.pj ? ` · poslovna jedinica <b>${esc(x.pj)}</b>` : ''}</div>
+    <table class="tbl"><tr><th>Artikal</th><th>Kol.</th><th>Cena</th><th>Rab.</th><th>Iznos</th></tr>${x.l.map(r => `<tr><td>${esc(r[1])}<div class="s">${esc(r[0])}${r[6] ? ' · ' + esc(r[6]) : ''}</div></td><td>${qfmt(r[2])}</td><td>${din(r[3])}</td><td>${r[4] ? qfmt(r[4]) + '%' : ''}</td><td>${din(r[5])}</td></tr>`).join('')}
+    <tr><td colspan="4"><b>Ukupno bez PDV</b></td><td><b>${din(x.iznos)}</b></td></tr></table>${x.nap ? `<p><b>Napomena:</b> ${esc(x.nap)}</p>` : ''}</div>`;
+}
+function ordCheck(t) {
+  const x = ordOf(t), nk = String(t.f.BSSifra || '').trim().toUpperCase(); if (!x || !nk || !S.SY.dokumenta) return '';
+  const D = (S.SY.dokumenta.k[String(x.kupac)] || []).map(d => d && d.value && !Array.isArray(d) ? d.value : d);
+  const d = D.find(d => String(d[1]).toUpperCase() === nk || String(d[1]).toUpperCase().endsWith(nk));
+  return d ? `<span class="badge ok">✓ ${esc(d[1])} u BS · ${din(d[3])}</span>` : '<span class="badge bad">⚠ NK nije vidljiva u BS</span>';
 }
 
 /* ---------- konkurencija ---------- */
@@ -1929,7 +2091,7 @@ function vAdmin() {
     <h2>Moduli po korisniku</h2><p class="s">Kvačica = ekran je uključen. „Svi” važi za one koji nemaju svoje podešavanje.</p>
     <div class="card" style="overflow:auto"><table class="tbl"><tr><th>Korisnik</th>${MODS.map(([, n]) => `<th>${n}</th>`).join('')}</tr>${users.map(u => `<tr><td>${u === '*' ? '<b>Svi</b>' : esc(nameOf(u)) + `<div class="s">${esc(ROLES[u] || '')}</div>`}</td>${MODS.map(([m]) => { const on = u === '*' ? !!(mods['*'] || {})[m] : modOn(m, u); return `<td><input type="checkbox" data-mod="${esc(u)}|${m}" ${on ? 'checked' : ''}></td>`; }).join('')}</tr>`).join('')}</table></div>
     <h2>Sinhronizacija sa BizniSoft-om</h2>
-    ${(() => { const sy = getSet('sinhronizacija'), st = S.SY.stanje; const N = { kupci: 'Kupci i jedinice', promet: 'Promet', dokumenta: 'Dokumenta', finansije: 'Finansije', stavke: 'Stavke (šta kupuje)' };
+    ${(() => { const sy = getSet('sinhronizacija'), st = S.SY.stanje; const N = { kupci: 'Kupci i jedinice', promet: 'Promet', dokumenta: 'Dokumenta', finansije: 'Finansije', stavke: 'Stavke (šta kupuje)', artikli: 'Artikli, cene, akcije, rabati', zalihe: 'Stanje magacina 400' };
       return `<div class="card" style="overflow:auto"><table class="tbl"><tr><th>Skup</th><th>Na koliko minuta</th><th>Poslednje osvežavanje</th><th>Rezultat</th></tr>${Object.keys(N).map(k => { const x = st && st.skupovi && st.skupovi[k]; return `<tr><td>${N[k]}</td><td><input class="dinp" style="width:90px;margin:0" type="number" min="0" data-sync="${k}" value="${esc(sy[k])}"></td><td>${x ? fmtDate(x.last) + ' ' + hhmm(x.last) : '—'}</td><td class="${x && !x.ok ? 'late' : ''}">${x ? esc(x.poruka || '') : '—'}</td></tr>`; }).join('')}</table>
       <p class="s">0 = isključeno · 1440 = jednom noću. Radno vreme za češće osvežavanje: od <input class="dinp" style="width:60px;display:inline-block;margin:0" type="number" data-sync="od" value="${esc(sy.od)}"> do <input class="dinp" style="width:60px;display:inline-block;margin:0" type="number" data-sync="do" value="${esc(sy.do)}"> h, noćno osvežavanje u <input class="dinp" style="width:60px;display:inline-block;margin:0" type="number" data-sync="nocu" value="${esc(sy.nocu)}"> h. Program na serveru čita ova podešavanja na svakih 5 minuta.${st ? ' Server: ' + esc(st.server || '') + ', poslednji rad ' + fmtDate(st.gen) + ' ' + hhmm(st.gen) : ''}</p></div>`; })()}
     <h2>Poslovne jedinice</h2>${(() => { const K = S.SY.kupci, n = S.items.filter(isPJ).length, m = pjMissing().length; return `<div class="card">U BizniSoft-u: <b>${K ? K.pj.length : '—'}</b> jedinica · u aplikaciji: <b>${n}</b>${m ? ` · nove za dodavanje: <b>${m}</b> <button class="btn" data-a="pjimport">Dodaj nove</button>` : ''}<p class="s">Dodaju se samo jedinice kupaca koji su u aplikaciji. Svaka jedinica ima svoju ličnu kartu, plan i posete; finansije ostaju na centrali.</p></div>`; })()}
