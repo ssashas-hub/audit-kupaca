@@ -1200,7 +1200,7 @@ function vDokumenta(it) {
   const D = S.SY.dokumenta && S.SY.dokumenta.k[bsKey(it)];
   if (!D) return '<div class="empty">Nema dokumenata u poslednjih 12 meseci (ili podaci još nisu stigli).</div>';
   const N = { FA: 'Faktura', PF: 'Profaktura', NK: 'Narudžbina', PK: 'Povraćaj', OK: 'Odobrenje' };
-  return `<table class="tbl">${D.map(d => `<tr><td><b>${N[d[0]] || d[0]}</b><div class="s">${esc(d[1])}</div></td><td>${fmtDate(d[2])}</td><td>${money(d[3])}<div class="s">${d[6]} st.</div></td></tr>`).join('')}</table><p class="s">stanje iz BizniSoft-a ${fmtDate(S.SY.dokumenta.gen)} ${hhmm(S.SY.dokumenta.gen)}</p>`;
+  return `<table class="tbl">${D.map(d => d && d.value && !Array.isArray(d) ? d.value : d).map(d => `<tr><td><b>${N[d[0]] || d[0]}</b><div class="s">${esc(d[1])}</div></td><td>${fmtDate(d[2])}</td><td>${money(d[3])}<div class="s">${d[6]} st.</div></td></tr>`).join('')}</table><p class="s">stanje iz BizniSoft-a ${fmtDate(S.SY.dokumenta.gen)} ${hhmm(S.SY.dokumenta.gen)}</p>`;
 }
 /* ---------- poslovne jedinice ---------- */
 const isPJ = it => !!(it && it.f.Centrala);
