@@ -868,6 +868,7 @@ function startAudit(fresh) {
     NabavljaOd: f.NabavljaOd || '', AuditPlanObilaska: cv(f.AuditPlanObilaska) || '', AuditMonitoring: !!f.AuditMonitoring,
     Lokacija: f.Lokacija || '', Beleske: '', AuditIshod: '', _bsSeg: bsSeg
   };
+  S.d._d0 = JSON.parse(JSON.stringify(S.d));
   S.photos = []; S.step = 0; S.visit.draft = { d: S.d, step: 0 }; saveDay(); go('audit');
 }
 function vAudit() {
@@ -1522,7 +1523,7 @@ function reportHtml(s, user) {
   const zd = S.X.zad.filter(z => z.f.Uradjeno && ymd(z.f.Uradjeno) === s && (z.f.Uradio || '').toLowerCase() === user);
   const td = (a) => `<td style="padding:4px 8px;border-bottom:1px solid #ddd">${a}</td>`;
   return `<div style="font-family:Arial,sans-serif;font-size:14px"><h2 style="margin:0 0 6px">Dnevni izveštaj · ${esc(nameOf(user))} · ${new Date(s + 'T12:00:00').toLocaleDateString('sr-RS')}</h2>
-    <p>Radni dan: <b>${st ? hhmm(st.v) : '—'}</b> – <b>${en ? hhmm(en.v) : '—'}</b> · Posete: <b>${vis.length}</b> · Plan: <b>${P.length}</b> · Neobiđeno: <b>${nis.length}</b> · Beleške: <b>${bel.length}</b> · Urađeni zadaci: <b>${zd.length}</b></p>
+    <p>Radni dan: <b>${st ? hhmm(st.v) : '—'}</b> – <b>${en ? hhmm(en.v) : '—'}</b> · Posete: <b>${vis.length}</b> · Plan: <b>${P.length}</b> · Neobiđeno: <b>${nis.length}</b> · Beleške: <b>${bel.length}</b> · Urađeni zadaci: <b>${zd.length}</b>${(() => { const n = ev.filter(e => e.t === 'NARUDŽBINA'); return n.length ? ` · Narudžbine: <b>${n.length}</b>` : ''; })()}</p>${(() => { const n = ev.filter(e => e.t === 'NARUDŽBINA'); return n.length ? `<h3>Narudžbine</h3><table style="border-collapse:collapse">${n.map(e => `<tr>${td(esc(e.n || ''))}${td(hhmm(e.v))}${td(esc(e.m || ''))}</tr>`).join('')}</table>` : ''; })()}
     <h3>Posete</h3><table style="border-collapse:collapse">${vis.map(v => `<tr>${td(esc(v.n))}${td(hhmm(v.s) + '–' + (v.e ? hhmm(v.e) : '?'))}${td(v.e ? Math.max(1, Math.round((Date.parse(v.e) - Date.parse(v.s)) / 60000)) + ' min' : '')}${td(esc(v.res || ''))}${td(/BEZ GPS/.test(v.m || '') ? 'bez GPS-a' : '')}</tr>`).join('') || '<tr><td>—</td></tr>'}</table>
     ${nis.length ? `<h3>Neobiđeni iz plana</h3><table style="border-collapse:collapse">${nis.map(e => `<tr>${td(esc(e.n))}${td(esc(e.m))}</tr>`).join('')}</table>` : ''}
     ${bel.length ? `<h3>Beleške</h3><table style="border-collapse:collapse">${bel.map(e => `<tr>${td(esc(e.n))}${td(esc(e.m))}</tr>`).join('')}</table>` : ''}
@@ -1652,7 +1653,7 @@ const daySet = s => new Set((Array.isArray(s) ? s : String(s || '').split(',')).
 const sameSet = (a, b) => a.size === b.size && [...a].every(x => b.has(x));
 const telN = s => String(s || '').replace(/\D/g, '').slice(-8);
 function tikDiff(f, d) {
-  const r = [], N = norm;
+  const r = [], N = norm, d0 = d._d0 || null;
   if (d.StatusNovi && !N(f.field_11).split(/\s+/).includes(N(d.StatusNovi))) r.push(['Status', f.field_11 || '', d.StatusNovi]);
   if (d.AuditSegment && !(f.field_14 && (N(d.AuditSegment).includes(N(f.field_14)) || N(f.field_14).includes(N(d.AuditSegment))))) r.push(['Segment', f.field_14 || '', d.AuditSegment]);
   if (d.AuditTeren && N(d.AuditTeren) !== N(f.field_9)) r.push(['Pravac', f.field_9 || '', d.AuditTeren]);
@@ -1660,7 +1661,11 @@ function tikDiff(f, d) {
   if (d.AuditPozivanje && d.AuditPozivanje.length && !sameSet(daySet(d.AuditPozivanje), daySet(f.field_16))) r.push(['Dani poziva', f.field_16 || '', d.AuditPozivanje.join(', ')]);
   if (d.NarucujeIme && N(d.NarucujeIme) !== N(f.field_7)) r.push(['Kontakt osoba', f.field_7 || '', d.NarucujeIme]);
   if (d.NarucujeTel && telN(d.NarucujeTel) !== telN(f.field_5)) r.push(['Telefon', f.field_5 || '', d.NarucujeTel]);
-  return r;
+  if (!d0) return r;
+  const K = { 'Status': 'StatusNovi', 'Segment': 'AuditSegment', 'Pravac': 'AuditTeren', 'Dani razvoza': 'AuditRazvoz', 'Dani poziva': 'AuditPozivanje', 'Kontakt osoba': 'NarucujeIme', 'Telefon': 'NarucujeTel' };
+  const same = (a, b) => JSON.stringify(Array.isArray(a) ? a.slice().sort() : a || '') === JSON.stringify(Array.isArray(b) ? b.slice().sort() : b || '');
+  // BizniSoft nema vrednost, a Petar je nije menjao (aplikacija ju je sama predložila): nije izmena za BizniSoft
+  return r.filter(x => String(x[1] || '').trim() || !same(d[K[x[0]]], d0[K[x[0]]]));
 }
 function tikFromAudit(it, d) {
   if (!modOn('tik')) return;
