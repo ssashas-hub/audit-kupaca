@@ -1759,7 +1759,8 @@ function artIdx() {
   const cen = {}, aat = {};
   (A.cen || []).forEach(r => { ((cen[r.c] = cen[r.c] || {})[r.a] = cen[r.c][r.a] || []).push(r); });
   Object.entries(A.artatr || {}).forEach(([t, L]) => (L || []).forEach(s => { (aat[s] = aat[s] || new Set()).add(Number(t)); }));
-  const kats = [...new Set(Object.values(A.art).map(a => (a.kat || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'sr'));
+  const km = {}; Object.values(A.art).forEach(a => { const k = (a.kat || '').trim(); if (k && !/^izba/i.test(k) && !km[k.toUpperCase()]) km[k.toUpperCase()] = k; });
+  const kats = Object.values(km).sort((a, b) => a.localeCompare(b, 'sr'));
   return S.SY._ai = { gen: A.gen, cen, aat, kats };
 }
 const dateOk = (r, d) => (!r.od || String(r.od).slice(0, 10) <= d) && (!r.dd || String(r.dd).slice(0, 10) >= d);
@@ -1801,12 +1802,12 @@ function ordRow(it, s, hint) {
   const A = S.SY.artikli, a = A.art[s]; if (!a) return '';
   const o = S.ord, k = ordKup(it), p = priceFor(k.k, k.pj, s, o.tip) || {}, q = num(o.q[s]);
   const z = S.SY.zalihe && S.SY.zalihe.k[s], fr = z ? num(z.f) : null;
-  const pak = [a.kp > 0 ? `kom. pak. ${qfmt(a.kp)}${a.kpi ? ' ' + esc(a.kpi) : ''}` : '', a.tp > 0 ? `trans. pak. ${qfmt(a.tp)}${a.tpi ? ' ' + esc(a.tpi) : ''}` : ''].filter(Boolean).join(' · ');
+  const pak = [a.kp > 0 ? `kom. pak. ${qfmt(a.kp)}` : '', a.tp > 0 ? `trans. pak. ${qfmt(a.tp)}` : ''].filter(Boolean).join(' · ');
   const odd = q && a.kp > 1 && Math.abs(q / a.kp - Math.round(q / a.kp)) > 1e-6;
   return `<div class="orow${q ? ' on' : ''}"><div class="grow">
     <div class="t">${esc(a.n)}</div>
     <div class="s">${esc(s)}${a.kat ? ' · ' + esc(a.kat) : ''} · ${esc(a.jm || '')}${pak ? ' · ' + pak : ''}</div>
-    <div class="s">${p.base ? (p.akc && p.rab === 0 ? `<span class="badge brand">${esc(p.akc)}</span> <b>${din(p.neto)}</b> <s>${din(p.base)}</s>` : `${din(p.cena)}${p.rab ? ` −${qfmt(p.rab)}% = <b>${din(p.neto)}</b>` : ''}${p.akc ? ` <span class="badge brand">${esc(p.akc)}</span>` : ''}`) : '<span class="late">nema cene</span>'}
+    <div class="s">${p.neto > 0 ? (p.akc && p.rab === 0 ? `<span class="badge brand">${esc(p.akc)}</span> <b>${din(p.neto)}</b>${p.base > p.neto ? ` <s>${din(p.base)}</s>` : ''}` : `${din(p.cena)}${p.rab ? ` −${qfmt(p.rab)}% = <b>${din(p.neto)}</b>` : ''}${p.akc ? ` <span class="badge brand">${esc(p.akc)}</span>` : ''}`) : '<span class="late">nema cene</span>'}
       · ${fr === null ? 'stanje —' : `<span class="${fr <= 0 || (q && q > fr) ? 'late' : ''}">slobodno ${qfmt(fr)}</span>`}${hint ? ' · ' + hint : ''}</div>
     ${odd ? `<div class="s late">nije ceo broj kom. pakovanja (${qfmt(a.kp)})</div>` : ''}
   </div><div class="qty"><button data-a="oq" data-v="${esc(s)}" data-k="-1">−</button><input type="number" inputmode="decimal" data-i="oq_${esc(s)}" value="${q || ''}" placeholder="0"><button data-a="oq" data-v="${esc(s)}" data-k="1">+</button>${a.tp > 0 ? `<button class="tp" data-a="oq" data-v="${esc(s)}" data-k="tp">+TP</button>` : ''}</div></div>`;
@@ -1841,7 +1842,7 @@ function vNarudzba() {
   if (o.tab === 'korpa') list = Object.keys(o.q).filter(s => num(o.q[s]) > 0).map(s => ordRow(it, s));
   else if (o.tab === 'obicno' && !qn && !o.kat) list = us.slice(0, 80).map(x => ordRow(it, x.s, `obično ${qfmt(Math.round(x.avg * 10) / 10)}`));
   else {
-    const L = Object.entries(A.art).filter(([s, a]) => (!o.kat || (a.kat || '').trim() === o.kat) && (!qn || norm(a.n + ' ' + s + ' ' + (a.kat || '')).includes(qn)));
+    const L = Object.entries(A.art).filter(([s, a]) => !/^izba/i.test((a.kat || '').trim()) && (!o.kat || (a.kat || '').trim().toUpperCase() === o.kat.toUpperCase()) && (!qn || norm(a.n + ' ' + s + ' ' + (a.kat || '')).includes(qn)));
     list = L.slice(0, 60).map(([s]) => ordRow(it, s)); if (L.length > 60) list.push(`<div class="s" style="margin:8px 2px">Prikazano 60 od ${L.length}. Suzi pretragu.</div>`);
   }
   const t = ordTotal(it), kc = Object.keys(o.q).filter(s => num(o.q[s]) > 0).length;
