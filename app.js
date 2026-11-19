@@ -809,6 +809,7 @@ function vKartica() {
       <div class="kpi"><span class="s">Poslednja kupovina</span><b>${f.field_20 ? fmtDate(f.field_20) : '—'}</b>${d !== null ? `<span class="s">pre ${d} dana</span>` : ''}</div>
       <div class="kpi"><span class="s">Klasa · operater</span><b>${esc(f.field_12 || '—')}</b><span class="s">${esc(f.field_10 || 'nedodeljen')}</span></div>
     </div>
+    ${pjBlock(it)}
     <div class="kact">
       ${modOn('plan') ? `<button data-a="kplan"><span>📅</span>U plan</button>` : ''}
       ${modOn('zad') ? `<button data-a="ktask"><span>✅</span>Zadatak</button>` : ''}
@@ -994,6 +995,8 @@ document.addEventListener('click', async e => {
     case 'tab': S.view = v; S.showAll = false; history.replaceState({ v }, ''); render(); scrollTo(0, 0); break;
     case 'fsel': await openFilter(v); break;
     case 'fintoggle': S.finOpen = !S.finOpen; rerender(); break;
+    case 'pjtoggle': S.pjOpen = !S.pjOpen; rerender(); break;
+    case 'pjimport': await pjImport(); break;
     case 'sttoggle': S.stOpen = !S.stOpen; rerender(); break;
     case 'pday': { let d = v; if (v === 'cal') d = await askDate('Izaberi dan za plan', S.pday && S.pday !== ymd() ? S.pday : addDays(ymd(), 2)); if (d) { S.pday = d; S.selMode = false; S.sel = new Set(); render(); } break; }
     case 'pup': planMove(v, -1); break;
@@ -1183,7 +1186,7 @@ function prometBlock(it) {
   const now = new Date(), ms = []; for (let i = 23; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); ms.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')); }
   const v = ms.map(m => (P.m[m] || [0])[0]), last12 = v.slice(12).reduce((a, b) => a + b, 0), prev12 = v.slice(0, 12).reduce((a, b) => a + b, 0), mx = Math.max(1, ...v.slice(12));
   const tr = prev12 ? Math.round((last12 - prev12) / prev12 * 100) : null;
-  return `<div class="card"><div class="fgrid"><div><span class="s">Promet 12 mes.</span><b>${money(last12)}</b></div><div><span class="s">Prethodnih 12</span><b>${money(prev12)}</b></div><div><span class="s">Trend</span><b class="${tr !== null && tr < -10 ? 'late' : ''}">${tr === null ? '—' : (tr > 0 ? '+' : '') + tr + '%'}</b></div><div><span class="s">Poslednja kupovina</span><b>${P.z ? fmtDate(P.z) : '—'}</b></div></div>
+  return `<div class="card"><div class="fgrid"><div><span class="s">Promet 12 mes.${isPJ(it) ? ' (cela firma)' : ''}</span><b>${money(last12)}</b></div><div><span class="s">Prethodnih 12</span><b>${money(prev12)}</b></div><div><span class="s">Trend</span><b class="${tr !== null && tr < -10 ? 'late' : ''}">${tr === null ? '—' : (tr > 0 ? '+' : '') + tr + '%'}</b></div><div><span class="s">Poslednja kupovina</span><b>${P.z ? fmtDate(P.z) : '—'}</b></div></div>
     <div class="bars">${ms.slice(12).map((m, i) => `<div title="${m}: ${money(v[12 + i])}"><i style="height:${Math.round(v[12 + i] / mx * 100)}%"></i><span>${m.slice(5)}</span></div>`).join('')}</div></div>`;
 }
 function stavkeBlock(it) {
@@ -1198,6 +1201,35 @@ function vDokumenta(it) {
   if (!D) return '<div class="empty">Nema dokumenata u poslednjih 12 meseci (ili podaci još nisu stigli).</div>';
   const N = { FA: 'Faktura', PF: 'Profaktura', NK: 'Narudžbina', PK: 'Povraćaj', OK: 'Odobrenje' };
   return `<table class="tbl">${D.map(d => `<tr><td><b>${N[d[0]] || d[0]}</b><div class="s">${esc(d[1])}</div></td><td>${fmtDate(d[2])}</td><td>${money(d[3])}<div class="s">${d[6]} st.</div></td></tr>`).join('')}</table><p class="s">stanje iz BizniSoft-a ${fmtDate(S.SY.dokumenta.gen)} ${hhmm(S.SY.dokumenta.gen)}</p>`;
+}
+/* ---------- poslovne jedinice ---------- */
+const isPJ = it => !!(it && it.f.Centrala);
+const pjOf = c => { const k = String(Number(c.f.Title)); return S.items.filter(x => x.f.Centrala === k).sort((a, b) => num(a.f.PJ) - num(b.f.PJ)); };
+const centralaOf = it => S.items.find(x => !x.f.Centrala && String(Number(x.f.Title)) === String(it.f.Centrala));
+function pjMissing() {
+  const K = S.SY.kupci; if (!K) return [];
+  const have = new Set(S.items.map(x => String(x.f.Title)));
+  const byK = {}; S.items.forEach(x => { if (!x.f.Centrala) byK[String(Number(x.f.Title))] = x; });
+  return K.pj.filter(p => byK[String(p.k)] && !have.has(p.k + '/' + p.s)).map(p => ({ p, c: byK[String(p.k)] }));
+}
+async function pjImport() {
+  const M = pjMissing(); if (!M.length) { toast('Nema novih poslovnih jedinica.'); return; }
+  if (!await askSure('Poslovne jedinice', `<p>Dodati <b>${M.length}</b> poslovnih jedinica iz BizniSoft-a u listu kupaca? Svaka dobija svoju ličnu kartu, plan i posete; finansije ostaju na centrali.</p>`, 'Dodaj')) return;
+  for (const { p, c } of M) {
+    const f = c.f, fields = { Title: p.k + '/' + p.s, Centrala: String(p.k), PJ: num(p.s), field_1: `${f.field_1 || ''} · ${p.n || 'PJ ' + p.s}`, field_2: f.field_2 || '', field_3: p.adr || '', field_4: p.mesto || '', field_5: p.tel || '', field_7: p.kon || '' };
+    ['field_8', 'field_10', 'field_11', 'field_12', 'field_13', 'field_14'].forEach(k => { if (f[k]) fields[k] = f[k]; });
+    if (cv(f.StatusNovi)) fields.StatusNovi = cv(f.StatusNovi);
+    if (cv(f.AuditSegment)) fields.AuditSegment = cv(f.AuditSegment);
+    const t = terenFor(p.mesto, null) || cv(f.AuditTeren); if (t) fields.AuditTeren = t;
+    const it = { id: 'tmp' + Date.now() + Math.random().toString(36).slice(2, 6), f: { ...fields } };
+    S.items.push(it); await queue({ type: 'create', tmp: it.id, fields });
+  }
+  saveItems(); toast(`Dodato ${M.length} poslovnih jedinica. Šalje se na SharePoint…`); render();
+}
+function pjBlock(it) {
+  if (isPJ(it)) { const c = centralaOf(it); return `<div class="card pjc">🏢 Poslovna jedinica ${esc(String(it.f.PJ || ''))} firme ${c ? `<button class="lnk" data-a="kupac" data-v="${esc(c.id)}">${esc(c.f.field_1 || c.f.Title)} ›</button>` : esc(it.f.Centrala)}<div class="s">Finansije, dokumenta i promet su na nivou cele firme.</div></div>`; }
+  const P = pjOf(it); if (!P.length) return '';
+  return `<button class="sec" data-a="pjtoggle">${S.pjOpen ? '▾' : '▸'} Poslovne jedinice · ${P.length}</button>${S.pjOpen ? P.map(rowKupac).join('') : ''}`;
 }
 /* ---------- liste ---------- */
 const XL = { plan: 'Plan poseta', zad: 'Zadaci', por: 'Poruke', ods: 'Odsustva', konk: 'Konkurencija', pod: 'Podešavanja' };
@@ -1791,6 +1823,7 @@ function vAdmin() {
     ${(() => { const sy = getSet('sinhronizacija'), st = S.SY.stanje; const N = { kupci: 'Kupci i jedinice', promet: 'Promet', dokumenta: 'Dokumenta', finansije: 'Finansije', stavke: 'Stavke (šta kupuje)' };
       return `<div class="card" style="overflow:auto"><table class="tbl"><tr><th>Skup</th><th>Na koliko minuta</th><th>Poslednje osvežavanje</th><th>Rezultat</th></tr>${Object.keys(N).map(k => { const x = st && st.skupovi && st.skupovi[k]; return `<tr><td>${N[k]}</td><td><input class="dinp" style="width:90px;margin:0" type="number" min="0" data-sync="${k}" value="${esc(sy[k])}"></td><td>${x ? fmtDate(x.last) + ' ' + hhmm(x.last) : '—'}</td><td class="${x && !x.ok ? 'late' : ''}">${x ? esc(x.poruka || '') : '—'}</td></tr>`; }).join('')}</table>
       <p class="s">0 = isključeno · 1440 = jednom noću. Radno vreme za češće osvežavanje: od <input class="dinp" style="width:60px;display:inline-block;margin:0" type="number" data-sync="od" value="${esc(sy.od)}"> do <input class="dinp" style="width:60px;display:inline-block;margin:0" type="number" data-sync="do" value="${esc(sy.do)}"> h, noćno osvežavanje u <input class="dinp" style="width:60px;display:inline-block;margin:0" type="number" data-sync="nocu" value="${esc(sy.nocu)}"> h. Program na serveru čita ova podešavanja na svakih 5 minuta.${st ? ' Server: ' + esc(st.server || '') + ', poslednji rad ' + fmtDate(st.gen) + ' ' + hhmm(st.gen) : ''}</p></div>`; })()}
+    <h2>Poslovne jedinice</h2>${(() => { const K = S.SY.kupci, n = S.items.filter(isPJ).length, m = pjMissing().length; return `<div class="card">U BizniSoft-u: <b>${K ? K.pj.length : '—'}</b> jedinica · u aplikaciji: <b>${n}</b>${m ? ` · nove za dodavanje: <b>${m}</b> <button class="btn" data-a="pjimport">Dodaj nove</button>` : ''}<p class="s">Dodaju se samo jedinice kupaca koji su u aplikaciji. Svaka jedinica ima svoju ličnu kartu, plan i posete; finansije ostaju na centrali.</p></div>`; })()}
     <h2>Šabloni poruka i zadataka</h2><p class="s">Jedan šablon po redu.</p>
     <div class="agrid"><div><div class="sh">Call centar → Petar</div>${ta('sab.op2kom', sab.op2kom.join('\n'))}</div><div><div class="sh">Petar → call centar</div>${ta('sab.kom2op', sab.kom2op.join('\n'))}</div><div><div class="sh">Petar → magacin</div>${ta('sab.kom2mag', sab.kom2mag.join('\n'))}</div><div><div class="sh">Odgovori dodirom</div>${ta('sab.odgovori', sab.odgovori.join('\n'))}</div></div>
     <div class="agrid"><div><div class="sh">Konkurenti</div>${ta('konkurenti', getSet('konkurenti').join('\n'))}${Object.keys(counts).length ? `<div class="s">Ručno upisani: ${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => esc(k) + ' (' + n + ')').join(', ')}</div>` : ''}</div><div><div class="sh">Razlozi za neobiđene</div>${ta('razlozi', getSet('razlozi').join('\n'))}</div><div><div class="sh">Praznici (GGGG-MM-DD)</div>${ta('praznici', getSet('praznici').join('\n'), 8)}</div><div><div class="sh">Vrste odsustva</div>${ta('vrsteOdsustva', getSet('vrsteOdsustva').join('\n'))}</div></div>
