@@ -1171,6 +1171,11 @@ async function flushX(op) {
   if (op.act === 'create') {
     const r = await g('/sites/' + S.site + '/lists/' + S.XL[op.k] + '/items', { method: 'POST', body: JSON.stringify({ fields: op.fields }) });
     const it = S.X[op.k].find(x => x.id === op.tmp); if (it) it.id = String(r.id);
+    try {
+      const f = op.fields;
+      if (op.k === 'por') notifyTeams(f.Za, `💬 ${nameOf(f.Od)}${f.KupacNaziv ? ' · ' + f.KupacNaziv : ''}: ${f.Tekst || f.Title}`);
+      if (op.k === 'zad' && f.Za && (f.Za || '').toLowerCase() !== (f.Zadao || '').toLowerCase()) notifyTeams(f.Za, `✅ Nov zadatak od ${nameOf(f.Zadao)} (${(PRI[num(f.Prioritet) || 2] || [''])[0]})${f.KupacNaziv ? ' · ' + f.KupacNaziv : ''}: ${f.Title}${f.Rok ? ' · rok ' + f.Rok : ''}`);
+    } catch (e) { console.warn('notify', e); }
     for (const o of await DB.all()) if (o.type === 'x' && String(o.itemId) === op.tmp) { o.itemId = String(r.id); await DB.put(o); }
     saveX();
   } else {
@@ -1180,6 +1185,39 @@ async function flushX(op) {
   return true;
 }
 
+/* ---------- Teams obaveštenja (šalje ih aplikacija pošiljaoca) ---------- */
+const APP_URL = 'https://ssashas-hub.github.io/audit-kupaca/index.html';
+function recipientsOf(za) {
+  za = String(za || '').toLowerCase();
+  if (za.includes('@')) return [za];
+  return Object.keys(ROLES).filter(e => ROLES[e] === za && !/onmicrosoft\.com$/.test(e));
+}
+async function notifyTeams(za, text) {
+  if (DEMO) return;
+  const to = recipientsOf(za).filter(e => e !== me()); if (!to.length) return;
+  let tk;
+  try { tk = (await S.pca.acquireTokenSilent({ scopes: ['Chat.Create', 'ChatMessage.Send', 'Mail.Send'], account: S.account })).accessToken; }
+  catch (e) { try { tk = (await S.pca.acquireTokenSilent({ scopes: ['Mail.Send'], account: S.account })).accessToken; } catch (e2) { console.warn('notify token', e2); return; } }
+  const H = { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json' };
+  const html = `${esc(text)}<br><a href="${APP_URL}">Otvori aplikaciju Audit kupaca</a>`;
+  let chats = {}; try { chats = JSON.parse(localStorage.getItem('ak_chats_v1') || '{}'); } catch (e) { }
+  for (const r of to) {
+    try {
+      if (ROLES[r] === 'mag') throw new Error('mejl');
+      let id = chats[r];
+      if (!id) {
+        const c = await fetch('https://graph.microsoft.com/v1.0/chats', { method: 'POST', headers: H, body: JSON.stringify({ chatType: 'oneOnOne', members: [me(), r].map(u => ({ '@odata.type': '#microsoft.graph.aadUserConversationMember', roles: ['owner'], 'user@odata.bind': `https://graph.microsoft.com/v1.0/users('${u}')` })) }) });
+        if (!c.ok) throw new Error('chat ' + c.status);
+        id = chats[r] = (await c.json()).id; localStorage.setItem('ak_chats_v1', JSON.stringify(chats));
+      }
+      const m = await fetch(`https://graph.microsoft.com/v1.0/chats/${id}/messages`, { method: 'POST', headers: H, body: JSON.stringify({ body: { contentType: 'html', content: html } }) });
+      if (!m.ok) { delete chats[r]; localStorage.setItem('ak_chats_v1', JSON.stringify(chats)); throw new Error('msg ' + m.status); }
+    } catch (e) {
+      // rezerva: mejl
+      try { await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: H, body: JSON.stringify({ message: { subject: 'Audit kupaca: ' + text.slice(0, 80), body: { contentType: 'HTML', content: html }, toRecipients: [{ emailAddress: { address: r } }] }, saveToSentItems: false }) }); } catch (e2) { console.warn('notify', r, e, e2); }
+    }
+  }
+}
 /* ---------- podešavanja (admin) ---------- */
 const DEF_SET = {
   moduli: { '*': { plan: 1, zad: 1, por: 1, konk: 1, pot: 1, ods: 1, mapa: 1 } },
