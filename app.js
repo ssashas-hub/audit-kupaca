@@ -189,21 +189,24 @@ function fOptions(k) {
   const ord = { kat: ['A', 'B', 'C', 'D', 'E'], poz: DANI, raz: DANI }[k];
   return Object.keys(c).sort((a, b) => ord ? ((ord.indexOf(a) + 1 || 99) - (ord.indexOf(b) + 1 || 99)) : /^nije|^bez|^ned/.test(a) ? 1 : /^nije|^bez|^ned/.test(b) ? -1 : a.localeCompare(b, 'sr', { numeric: true })).map(v => [v, c[v]]);
 }
+// prozori: dugme Nazad (Android) zatvara prozor, a ne ekran
+function modalOpen(m, close) { m._close = close; history.pushState({ modal: 1 }, ''); document.body.appendChild(m); }
+function modalDone(m) { m.remove(); if (history.state && history.state.modal) { S.skipPop = true; history.back(); } }
 function pickSheet(title, groups) { // groups: [[key, title, [[val,count]], selected[]]]
   return new Promise(res => {
     const sel = {}; groups.forEach(([k, , , cur]) => sel[k] = new Set(cur));
     const m = document.createElement('div'); m.className = 'modal sheet';
-    const paint = () => m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><div class="sbody">${groups.map(([k, t, opts]) => `${groups.length > 1 ? `<div class="sh">${esc(t)}</div>` : ''}${opts.map(([v, n]) => `<button class="ck ${sel[k].has(v) ? 'on' : ''}" data-k="${k}" data-v="${esc(v)}"><span class="box2">${sel[k].has(v) ? '✓' : ''}</span><span class="grow">${esc(v)}</span><span class="s">${n}</span></button>`).join('') || '<div class="s">Nema podataka.</div>'}`).join('')}</div><div class="mbtn"><button class="btn" data-m="clear">Poništi</button><button class="btn pri" data-m="ok">Primeni</button></div></div>`;
+    const paint = () => m.innerHTML = `<div class="box"><div class="mh"><h2>${esc(title)}</h2><button class="x" data-m="x" aria-label="Zatvori">✕</button></div><div class="sbody">${groups.map(([k, t, opts]) => `${groups.length > 1 ? `<div class="sh">${esc(t)}</div>` : ''}${opts.map(([v, n]) => `<button class="ck ${sel[k].has(v) ? 'on' : ''}" data-k="${k}" data-v="${esc(v)}"><span class="box2">${sel[k].has(v) ? '✓' : ''}</span><span class="grow">${esc(v)}</span><span class="s">${n}</span></button>`).join('') || '<div class="s">Nema podataka.</div>'}`).join('')}</div><div class="mbtn"><button class="btn" data-m="clear">Poništi</button><button class="btn pri" data-m="ok">Primeni</button></div></div>`;
     paint();
     m.addEventListener('click', e => {
       e.stopPropagation();
       const c = e.target.closest('.ck'); if (c) { const st = sel[c.dataset.k]; st.has(c.dataset.v) ? st.delete(c.dataset.v) : st.add(c.dataset.v); const sc = m.querySelector('.sbody').scrollTop; paint(); m.querySelector('.sbody').scrollTop = sc; return; }
       const b = e.target.closest('[data-m]');
       if (b && b.dataset.m === 'clear') { Object.values(sel).forEach(x => x.clear()); paint(); return; }
-      if (b && b.dataset.m === 'ok') { m.remove(); const out = {}; Object.keys(sel).forEach(k => out[k] = [...sel[k]]); res(out); return; }
-      if (e.target === m) { m.remove(); res(null); }
+      if (b && b.dataset.m === 'ok') { modalDone(m); const out = {}; Object.keys(sel).forEach(k => out[k] = [...sel[k]]); res(out); return; }
+      if ((b && b.dataset.m === 'x') || e.target === m) { modalDone(m); res(null); }
     });
-    document.body.appendChild(m);
+    modalOpen(m, () => { m.remove(); res(null); });
   });
 }
 async function openFilter(k) {
@@ -267,16 +270,16 @@ function askSure(title, body, ok = 'Da, siguran sam') {
   return new Promise(res => {
     const m = document.createElement('div'); m.className = 'modal';
     m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><div class="mb">${body}</div><div class="mbtn"><button class="btn" data-m="0">Odustani</button><button class="btn pri" data-m="1">${esc(ok)}</button></div></div>`;
-    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); m.remove(); res(!!b && b.dataset.m === '1'); });
-    document.body.appendChild(m);
+    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); modalDone(m); res(!!b && b.dataset.m === '1'); });
+    modalOpen(m, () => { m.remove(); res(false); });
   });
 }
 function askChoice(title, opts) {
   return new Promise(res => {
     const m = document.createElement('div'); m.className = 'modal';
     m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><div class="opts">${opts.map(([k, t, d]) => `<button class="opt" data-m="${k}"><span><b>${esc(t)}</b><br><span class="s">${esc(d)}</span></span></button>`).join('')}</div><div class="mbtn"><button class="btn" data-m="">Odustani</button></div></div>`;
-    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); m.remove(); res(b ? b.dataset.m : ''); });
-    document.body.appendChild(m);
+    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); modalDone(m); res(b ? b.dataset.m : ''); });
+    modalOpen(m, () => { m.remove(); res(''); });
   });
 }
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2600); }
@@ -394,6 +397,8 @@ addEventListener('offline', () => { S.online = false; paintSync(); });
 /* ---------- navigacija ---------- */
 function go(view, push = true) { S.view = view; if (push) history.pushState({ v: view }, ''); render(); scrollTo(0, 0); }
 addEventListener('popstate', () => {
+  if (S.skipPop) { S.skipPop = false; return; }
+  const md = [...document.querySelectorAll('.modal')].pop(); if (md && md._close) { md._close(); return; }
   const back = { kupci: 'tereni', kartica: S.from === 'kupci' && S.teren === null ? 'tereni' : (S.from || 'danas'), audit: 'kartica', kraj: 'vise', krajposete: 'kartica', novi: S.from || 'danas', beleska: S.noteNew ? (S.from || 'danas') : 'kartica' }[S.view];
   if (back) go(back, false);
 });
