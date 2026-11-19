@@ -191,7 +191,7 @@ function fOptions(k) {
 }
 // prozori: dugme Nazad (Android) zatvara prozor, a ne ekran
 function modalOpen(m, close) { m._close = close; history.pushState({ modal: 1 }, ''); document.body.appendChild(m); }
-function modalDone(m) { m.remove(); if (history.state && history.state.modal) { S.skipPop = true; history.back(); } }
+function modalDone(m, cb) { m.remove(); if (history.state && history.state.modal) { S.skipPop = true; S.afterPop = cb || null; history.back(); setTimeout(() => { if (S.afterPop) { const c = S.afterPop; S.afterPop = null; S.skipPop = false; c(); } }, 400); } else if (cb) cb(); }
 function pickSheet(title, groups) { // groups: [[key, title, [[val,count]], selected[]]]
   return new Promise(res => {
     const sel = {}; groups.forEach(([k, , , cur]) => sel[k] = new Set(cur));
@@ -203,8 +203,8 @@ function pickSheet(title, groups) { // groups: [[key, title, [[val,count]], sele
       const c = e.target.closest('.ck'); if (c) { const st = sel[c.dataset.k]; st.has(c.dataset.v) ? st.delete(c.dataset.v) : st.add(c.dataset.v); const sc = m.querySelector('.sbody').scrollTop; paint(); m.querySelector('.sbody').scrollTop = sc; return; }
       const b = e.target.closest('[data-m]');
       if (b && b.dataset.m === 'clear') { Object.values(sel).forEach(x => x.clear()); paint(); return; }
-      if (b && b.dataset.m === 'ok') { modalDone(m); const out = {}; Object.keys(sel).forEach(k => out[k] = [...sel[k]]); res(out); return; }
-      if ((b && b.dataset.m === 'x') || e.target === m) { modalDone(m); res(null); }
+      if (b && b.dataset.m === 'ok') { const out = {}; Object.keys(sel).forEach(k => out[k] = [...sel[k]]); modalDone(m, () => res(out)); return; }
+      if ((b && b.dataset.m === 'x') || e.target === m) { modalDone(m, () => res(null)); }
     });
     modalOpen(m, () => { m.remove(); res(null); });
   });
@@ -270,7 +270,7 @@ function askSure(title, body, ok = 'Da, siguran sam') {
   return new Promise(res => {
     const m = document.createElement('div'); m.className = 'modal';
     m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><div class="mb">${body}</div><div class="mbtn"><button class="btn" data-m="0">Odustani</button><button class="btn pri" data-m="1">${esc(ok)}</button></div></div>`;
-    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); modalDone(m); res(!!b && b.dataset.m === '1'); });
+    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); modalDone(m, () => res(!!b && b.dataset.m === '1')); });
     modalOpen(m, () => { m.remove(); res(false); });
   });
 }
@@ -278,7 +278,7 @@ function askChoice(title, opts) {
   return new Promise(res => {
     const m = document.createElement('div'); m.className = 'modal';
     m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><div class="opts">${opts.map(([k, t, d]) => `<button class="opt" data-m="${k}"><span><b>${esc(t)}</b><br><span class="s">${esc(d)}</span></span></button>`).join('')}</div><div class="mbtn"><button class="btn" data-m="">Odustani</button></div></div>`;
-    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); modalDone(m); res(b ? b.dataset.m : ''); });
+    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); modalDone(m, () => res(b ? b.dataset.m : '')); });
     modalOpen(m, () => { m.remove(); res(''); });
   });
 }
@@ -371,6 +371,8 @@ async function flush() {
         if (S.day && S.day.visits) S.day.visits.forEach(v => { if (v.id === op.tmp) v.id = r.id; });
         saveDay();
         saveItems();
+      } else if (op.type === 'x') {
+        if (!(await flushX(op))) continue;
       } else if (op.type === 'log') {
         if (!S.logList) throw new Error('Nema liste Dnevnik rada');
         const f = { ...op.fields }; if (String(f.KupacId || '').startsWith('tmp')) { const it = S.items.find(x => x.f.Title === f.KupacSifra); if (it && !String(it.id).startsWith('tmp')) f.KupacId = String(it.id); }
@@ -397,9 +399,9 @@ addEventListener('offline', () => { S.online = false; paintSync(); });
 /* ---------- navigacija ---------- */
 function go(view, push = true) { S.view = view; if (push) history.pushState({ v: view }, ''); render(); scrollTo(0, 0); }
 addEventListener('popstate', () => {
-  if (S.skipPop) { S.skipPop = false; return; }
+  if (S.skipPop) { S.skipPop = false; const c = S.afterPop; S.afterPop = null; if (c) c(); return; }
   const md = [...document.querySelectorAll('.modal')].pop(); if (md && md._close) { md._close(); return; }
-  const back = { kupci: 'tereni', kartica: S.from === 'kupci' && S.teren === null ? 'tereni' : (S.from || 'danas'), audit: 'kartica', kraj: 'vise', krajposete: 'kartica', novi: S.from || 'danas', beleska: S.noteNew ? (S.from || 'danas') : 'kartica' }[S.view];
+  const back = { kupci: 'tereni', kartica: S.from === 'kupci' && S.teren === null ? 'tereni' : (S.from || 'danas'), audit: 'kartica', kraj: 'vise', krajposete: 'kartica', novi: S.from || 'danas', beleska: S.noteNew ? (S.from || 'danas') : 'kartica', thread: S.from2 || 'poruke', mapa: 'danas', pin: 'kartica' }[S.view];
   if (back) go(back, false);
 });
 
@@ -410,10 +412,12 @@ function bar(title, back) {
 function saveDraft() { if (S.visit && S.d && S.view === 'audit' && S.cur && S.cur.id === S.visit.id) { S.visit.draft = { d: S.d, step: S.step }; saveDay(); } }
 function render() {
   saveDraft(); if (S.visit) visitItem();
-  let v = { danas: vDanas, vise: vVise, beleska: vBeleska, tereni: vTereni, kupci: vKupci, kartica: vKartica, audit: vAudit, novi: vNovi, login: vLogin, kraj: vKraj, krajposete: vKrajPosete }[S.view] || vTereni;
-  if (S.view !== 'login' && !dayOn() && !(S.visit && sameDay(S.visit.start))) v = vDan;
+  let v = { poruke: vPoruke, thread: vThread, nedelja: vNedelja, mapa: vMapa, pin: vPin, aktivnost: vAktivnost, nadzor: vNadzor, admin: vAdmin, danas: vDanas, vise: vVise, beleska: vBeleska, tereni: vTereni, kupci: vKupci, kartica: vKartica, audit: vAudit, novi: vNovi, login: vLogin, kraj: vKraj, krajposete: vKrajPosete }[S.view] || vTereni;
+  if (S.view !== 'login' && isKom()) { if (dayOpenOld() && !(S.visit && sameDay(S.visit.start))) v = vJuce; else if (!dayOn() && !(S.visit && sameDay(S.visit.start))) v = vDan; }
   $app.innerHTML = (DEMO ? '<div class="demo">Probni režim – izmišljeni kupci, ništa se ne šalje</div>' : '') + v();
   document.body.classList.toggle('tabs-on', !!document.querySelector('.tabs'));
+  document.body.classList.toggle('desk', !isKom());
+  if (v === vNedelja) wireWeek(); else if (v === vMapa) showMap(S.pday || ymd()); else if (v === vPin) wirePin(); else if (S.lmap && !document.getElementById('map')) { S.lmap.remove(); S.lmap = null; }
   paintSync();
   const sIn = document.getElementById('q'); if (sIn && S.focusQ) { sIn.focus(); sIn.setSelectionRange(sIn.value.length, sIn.value.length); S.focusQ = false; }
 }
@@ -434,8 +438,9 @@ function vKraj() {
   return bar('Kraj radnog dana', true) + `<main class="main">
     <div class="sum"><div class="kpi"><span class="s">Početak</span><b>${S.day ? hhmm(S.day.start) : '—'}</b></div><div class="kpi"><span class="s">Posete danas</span><b>${visits.length}</b></div></div>
     ${visits.map(v => `<div class="row" style="cursor:default"><div class="grow"><div class="t ell">${esc(v.n)}</div><div class="s">${hhmm(v.s)}–${v.e ? hhmm(v.e) : '…'}${v.e ? ' · ' + Math.max(1, Math.round((Date.parse(v.e) - Date.parse(v.s)) / 60000)) + ' min' : ''}</div></div><div class="right s">${esc(v.i || '')}</div></div>`).join('') || '<div class="empty">Danas nije bilo poseta.</div>'}
+    ${krajPlanHtml()}
     <div class="err" id="err"></div>
-  </main><div class="foot"><div class="in"><button class="btn pri" data-a="dayend" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Tražim lokaciju…' : 'Završi radni dan'}</button></div></div>`;
+  </main><div class="foot"><div class="in"><button class="btn pri" data-a="dayend" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Završavam…' : 'Završi radni dan'}</button></div></div>`;
 }
 // za probu: kad GPS ne uspe, nudi se nastavak bez GPS-a (beleži se u dnevnik)
 function gpsFail(msg, what, far) {
@@ -469,11 +474,14 @@ async function dayStart() {
 }
 async function dayEnd() {
   if (S.visit) { toast('Prvo završi posetu u toku.'); return; }
+  const chk = krajPlanCheck(); if (chk) { document.getElementById('err').textContent = chk; return; }
   S.busy = true; render();
+  await krajPlanApply();
   let p = null; try { p = await getPos(); } catch (e) { }
   S.day.end = new Date().toISOString(); saveDay();
   await logEvent('KRAJ DANA', p, null, p ? {} : { Napomena: 'lokacija nije dostupna' });
-  S.busy = false; S.view = 'danas'; render();
+  const mr = await sendReport(ymd());
+  S.busy = false; S.view = 'danas'; render(); toast('Radni dan je završen.' + (mr ? ' Izveštaj: ' + mr : ' Izveštaj je poslat.'));
 }
 const sameDay = t => t && new Date(t).toLocaleDateString('sr-RS') === new Date().toLocaleDateString('sr-RS');
 function visitItem() {
@@ -488,6 +496,7 @@ async function autoCloseOldVisit() {
   S.visit = null; saveDay();
 }
 function beginVisit(it, p) {
+  try { markPlanVisited(it); } catch (e) { }
   S.visit = { id: it.id, sifra: it.f.Title, n: it.f.field_1 || it.f.Title, start: new Date().toISOString(), audit: false };
   S.day.visits = S.day.visits || []; S.day.visits.push({ id: it.id, n: S.visit.n, s: S.visit.start }); saveDay();
 }
@@ -577,7 +586,11 @@ async function visitEnd() {
   toast('Poseta je završena.'); history.back();
 }
 function tabs(on) {
-  return `<nav class="tabs">${[['danas', '☀', 'Danas'], ['tereni', '☰', 'Kupci'], ['vise', '⋯', 'Više']].map(([k, i, n]) => `<button class="${on === k ? 'on' : ''}" data-a="tab" data-v="${k}"><span>${i}</span>${n}</button>`).join('')}</nav>`;
+  const n = unreadCount(), P = modOn('por') ? [['poruke', '💬', 'Poruke', n]] : [];
+  const T = isKom() ? [['danas', '☀', 'Danas'], ['tereni', '☰', 'Kupci'], ...P, ['vise', '⋯', 'Više']]
+    : isAdmin() ? [['aktivnost', '⚡', 'Aktivnost'], ['nadzor', '📊', 'Nadzor'], ['nedelja', '📅', 'Plan'], ...P, ['tereni', '☰', 'Kupci'], ['admin', '⚙', 'Admin'], ['vise', '⋯', 'Više']]
+    : [['aktivnost', '⚡', 'Aktivnost'], ['nedelja', '📅', 'Plan'], ...P, ['tereni', '☰', 'Kupci'], ['vise', '⋯', 'Više']];
+  return `<nav class="tabs">${T.map(([k, i, nm, c]) => `<button class="${on === k ? 'on' : ''}" data-a="tab" data-v="${k}"><span>${i}</span>${nm}${c !== undefined ? `<b class="tb">${c || ''}</b>` : ''}</button>`).join('')}</nav>`;
 }
 function dayStats() {
   const vs = (S.day && S.day.visits) || [], done = vs.filter(v => v.e);
@@ -609,7 +622,8 @@ function rowPlan({ it, d }) {
   const f = it.f, k = klasaOf(it);
   const when = !d ? 'plan: ' + esc(planOf(it).label) : d.ob ? (d.lv ? 'obići · poslednja poseta ' + fmtDate(d.lv) : 'obići · još nije obiđen') : d.never ? 'nikad obiđen' : `poslednja poseta ${fmtDate(d.lv)} · ` + (d.over > 0 ? `<b class="late">kasni ${d.over} d</b>` : d.over === 0 ? '<b class="late">danas na redu</b>' : `na redu za ${-d.over} d`);
   const badges = (cv(f.StatusNovi) === 'potencijalni' ? '<span class="badge brand">potencijalni</span> ' : '') + (S.visit && S.visit.id === it.id ? '<span class="badge ok">poseta u toku</span>' : '');
-  return `<div class="row" data-a="kupac" data-v="${esc(it.id)}"><div class="grow"><div class="t ell">${esc(f.field_1 || f.Title)}</div><div class="s ell">${esc([f.field_3, f.field_4].filter(Boolean).join(', ') || '—')}</div><div class="s">${when}</div>${badges ? `<div>${badges}</div>` : ''}</div><div class="right">${k ? `<div class="kl">${k}</div>` : ''}<div class="s">${money(f.field_19)}</div></div></div>`;
+  const sm = S.selMode, on = sm && S.sel && S.sel.has(String(it.id)), inP = sm && planOfDay(S.pday || ymd()).some(p => p.f.Title === String(f.Title));
+  return `<div class="row ${on ? 'sel' : ''}" data-a="${sm ? 'selrow' : 'kupac'}" data-v="${esc(it.id)}">${sm ? `<span class="ckb">${on ? '✓' : inP ? '•' : ''}</span>` : ''}<div class="grow"><div class="t ell">${esc(f.field_1 || f.Title)}${inP ? ' <span class="badge">u planu</span>' : ''}</div><div class="s ell">${esc([f.field_3, f.field_4].filter(Boolean).join(', ') || '—')}</div><div class="s">${when}</div>${badges ? `<div>${badges}</div>` : ''}</div><div class="right">${k ? `<div class="kl">${k}</div>` : ''}<div class="s">${money(f.field_19)}</div></div></div>`;
 }
 function fBtn(k) {
   const d = FDEF[k], sel = selOf(k);
@@ -617,23 +631,31 @@ function fBtn(k) {
   return `<button class="fsel ${sel.length ? 'on' : ''}" data-a="fsel" data-v="${k}"><span class="ic">${d.ic}</span><span class="fl ell">${esc(txt)}</span>${sel.length ? `<span class="fx" data-a="fclr" data-v="${k}">✕</span>` : '<span class="cv">▾</span>'}</button>`;
 }
 function vDanas() {
-  const st = dayStats(), more = MOREF.filter(k => selOf(k).length).length;
-  return bar('Danas') + `<main class="main">
-    ${visitBanner()}
-    <div class="sum4"><div class="kpi"><span class="s">Posete</span><b>${st.n}</b></div><div class="kpi"><span class="s">Prosečno</span><b>${st.avg ? st.avg + ' min' : '—'}</b></div><div class="kpi"><span class="s">Auditi</span><b>${st.a}</b></div><div class="kpi"><span class="s">Beleške</span><b>${st.b}</b></div></div>
-    <div class="s" style="margin:-4px 2px 10px">${S.day ? 'Radni dan od ' + hhmm(S.day.start) + (S.day.noGps ? ' (bez GPS-a)' : '') : ''}</div>
-    <div class="fsel srch"><span class="ic">🔍</span><input type="search" data-i="dq" placeholder="Pretraži kupce po nazivu, šifri, adresi" value="${esc(S.dq)}"></div>
+  const st = dayStats(), more = MOREF.filter(k => selOf(k).length).length, t = ymd(), pd = S.pday || t, today = pd === t;
+  const filt = `<div class="fsel srch"><span class="ic">🔍</span><input type="search" data-i="dq" placeholder="Pretraži kupce po nazivu, šifri, adresi" value="${esc(S.dq)}"></div>
     ${MAINF.map(fBtn).join('')}
     <button class="fsel ${more ? 'on' : ''}" data-a="fsel" data-v="more"><span class="ic">⚙</span><span class="fl">Još filtera${more ? ` (${more})` : ''}</span><span class="cv">›</span></button>
-    ${Object.keys(S.flt).length ? '<button class="lnk" style="margin:2px 2px 10px" data-a="fclrall">Poništi sve filtere</button>' : ''}
+    ${Object.keys(S.flt).length ? '<button class="lnk" style="margin:2px 2px 10px" data-a="fclrall">Poništi sve filtere</button>' : ''}`;
+  return bar('Danas') + `<main class="main">
+    ${visitBanner()}
+    ${reminderDue() ? '<div class="row alarm" data-a="kraj"><div class="grow"><div class="t">⚠ Završi radni dan</div><div class="s">Pre odlaska zatvori dan i neobiđene kupce iz plana.</div></div><div class="right">›</div></div>' : ''}
+    <div class="sum4"><div class="kpi"><span class="s">Posete</span><b>${st.n}</b></div><div class="kpi"><span class="s">Prosečno</span><b>${st.avg ? st.avg + ' min' : '—'}</b></div><div class="kpi"><span class="s">Auditi</span><b>${st.a}</b></div><div class="kpi"><span class="s">Beleške</span><b>${st.b}</b></div></div>
+    <div class="s" style="margin:-4px 2px 10px">${S.day ? 'Radni dan od ' + hhmm(S.day.start) + (S.day.noGps ? ' (bez GPS-a)' : '') : ''}</div>
+    ${modOn('plan') ? `<div class="seg daysel"><button class="${today ? 'on' : ''}" data-a="pday" data-v="${t}">Danas</button><button class="${pd === addDays(t, 1) ? 'on' : ''}" data-a="pday" data-v="${addDays(t, 1)}">Sutra</button><button class="${!today && pd !== addDays(t, 1) ? 'on' : ''}" data-a="pday" data-v="cal">📅 ${!today && pd !== addDays(t, 1) ? dLabel(pd) : 'Datum'}</button></div>` : ''}
+    ${planBlock(pd)}
+    ${today ? tasksBlock() : ''}
+    <div class="sech" style="margin-top:6px"><span>${today ? 'Kupci' : 'Dodaj kupce u plan za ' + dLabel(pd)}</span></div>
+    ${filt}
     <div id="dlist">${danasList()}</div>
-  </main><button class="fab" data-a="novi">＋ Nov kupac</button>` + tabs('danas');
+  </main>${S.selMode && S.sel && S.sel.size ? `<div class="selbar"><span>Izabrano: ${S.sel.size}</span><button class="btn pri" data-a="seladd">📅 Dodaj u plan${today ? '' : ' za ' + dLabel(pd)}</button></div>` : '<button class="fab" data-a="novi">＋ Nov kupac</button>'}` + tabs('danas');
 }
 function vVise() {
   return bar('Više') + `<main class="main">
     <div class="card"><dl class="kv"><dt>Prijavljen</dt><dd>${esc(userName() || '—')}</dd><dt>Kupaca u telefonu</dt><dd>${S.items.length}</dd><dt>Čeka na slanje</dt><dd>${S.pending}${S.pending && !navigator.onLine ? ' (nema mreže)' : ''}</dd><dt>Radni dan</dt><dd>${S.day ? 'od ' + hhmm(S.day.start) + (S.day.end ? ' do ' + hhmm(S.day.end) : '') : '—'}</dd></dl></div>
     <button class="btn" style="width:100%;margin-top:12px" data-a="refresh">⟳ Osveži podatke</button>
-    <button class="btn" style="width:100%;margin-top:10px" data-a="kraj">Kraj radnog dana</button>
+    ${isKom() ? '<button class="btn" style="width:100%;margin-top:10px" data-a="kraj">Kraj radnog dana</button>' : ''}
+    ${modOn('ods') && isKom() ? `<button class="btn" style="width:100%;margin-top:10px" data-a="newods">🏖 Prijavi odsustvo</button>${S.X.ods.filter(o => (o.f.Korisnik || '').toLowerCase() === me() && o.f.Do >= ymd()).map(o => `<div class="s" style="margin:6px 2px">${esc(o.f.Vrsta)} ${fmtDate(o.f.Od)}–${fmtDate(o.f.Do)} · ${esc(o.f.Status)}</div>`).join('')}` : ''}
+    <div class="s" style="margin:12px 2px">Uloga: ${esc(ROLE_N[role()] || role())}</div>
     <button class="btn" style="width:100%;margin-top:10px" data-a="logout">Odjava</button>
     <p class="s" style="text-align:center;margin-top:18px">Audit kupaca · verzija 19.11.2026</p>
   </main>` + tabs('vise');
@@ -785,6 +807,17 @@ function vKartica() {
       <div class="kpi"><span class="s">Poslednja kupovina</span><b>${f.field_20 ? fmtDate(f.field_20) : '—'}</b>${d !== null ? `<span class="s">pre ${d} dana</span>` : ''}</div>
       <div class="kpi"><span class="s">Klasa · operater</span><b>${esc(f.field_12 || '—')}</b><span class="s">${esc(f.field_10 || 'nedodeljen')}</span></div>
     </div>
+    <div class="kact">
+      ${modOn('plan') ? `<button data-a="kplan"><span>📅</span>U plan</button>` : ''}
+      ${modOn('zad') ? `<button data-a="ktask"><span>✅</span>Zadatak</button>` : ''}
+      ${modOn('por') ? `<button data-a="kmsg"><span>💬</span>Poruka${(() => { const n = S.X.por.filter(m => m.f.KupacSifra === String(f.Title) && unread(m)).length; return n ? ` <b class="tb">${n}</b>` : ''; })()}</button>` : ''}
+      ${modOn('konk') ? `<button data-a="kkonk"><span>🏁</span>Konkurencija</button>` : ''}
+      ${modOn('mapa') ? `<button data-a="kpin"><span>📍</span>Na mapi</button>` : ''}
+    </div>
+    ${(() => { const P = S.X.plan.filter(p => p.f.Title === String(f.Title) && p.f.Status === 'planiran' && p.f.Datum >= ymd()).sort((a, b) => a.f.Datum.localeCompare(b.f.Datum)); return P.length ? `<div class="s" style="margin:6px 2px">📅 U planu: ${P.map(p => dLabel(p.f.Datum) + (p.f.Korisnik !== me() ? ' (' + esc(nameOf(p.f.Korisnik)) + ')' : '')).join(', ')}</div>` : ''; })()}
+    ${modOn('pot') ? `<div class="potrow"><span class="s">Potencijal</span>${[1, 2, 3, 4, 5].map(v => `<button class="${num(f.PotencijalOcena) === v ? 'on' : ''}" data-a="pot" data-v="${v}">${v}</button>`).join('')}</div>` : ''}
+    ${modOn('zad') ? (() => { const Z = custTasks(f.Title).sort((a, b) => (a.f.Status === 'urađen') - (b.f.Status === 'urađen') || num(a.f.Prioritet) - num(b.f.Prioritet)).slice(0, 8); return Z.length ? `<div class="sech"><span>Zadaci kod ovog kupca</span></div>${Z.map(z => taskHtml(z)).join('')}` : ''; })() : ''}
+    ${modOn('konk') ? (() => { const K = S.X.konk.filter(k => k.f.KupacSifra === String(f.Title)).sort((a, b) => String(b.f.Vreme).localeCompare(String(a.f.Vreme)))[0]; return K ? `<div class="card" style="margin-top:8px"><b>Konkurencija</b> (${fmtDate(K.f.Vreme)}): ${esc(K.f.Konkurenti)}${K.f.Grupe ? ' · ' + esc(K.f.Grupe) : ''}${K.f.Cene ? ' · cene: ' + esc(K.f.Cene) : ''}${K.f.Uslovi ? ' · uslovi: ' + esc(K.f.Uslovi) : ''}${K.f.Napomena ? '<div class="s">' + esc(K.f.Napomena) + '</div>' : ''}</div>` : ''; })() : ''}
     ${(() => { const d = dueOf(it), p = planOf(it); return `<div class="card plan"><b>Plan obilaska:</b> ${esc(p.label)}${d && !d.top ? ` · ${d.over > 0 ? '<b class="late">kasni ' + d.over + ' d</b>' : d.over === 0 ? '<b class="late">danas na redu</b>' : 'na redu za ' + (-d.over) + ' d'}` : d && d.never ? ' · nikad obiđen' : ''}${it.f.Obici ? ' · <span class="badge warn">obići</span>' : ''}</div>`; })()}
     <div class="seg ktabs"><button class="${S.ktab !== 'posete' ? 'on' : ''}" data-a="ktab" data-v="pregled">Pregled</button><button class="${S.ktab === 'posete' ? 'on' : ''}" data-a="ktab" data-v="posete">Posete i beleške · ${visitHistory(it).length}</button></div>
     ${S.ktab === 'posete' ? vPosete(it) : `
@@ -957,6 +990,45 @@ document.addEventListener('click', async e => {
     case 'kupac': S.cur = S.items.find(x => String(x.id) === v); S.from = S.view; S.ktab = 'pregled'; go('kartica'); break;
     case 'tab': S.view = v; S.showAll = false; history.replaceState({ v }, ''); render(); scrollTo(0, 0); break;
     case 'fsel': await openFilter(v); break;
+    case 'pday': { let d = v; if (v === 'cal') d = await askDate('Izaberi dan za plan', S.pday && S.pday !== ymd() ? S.pday : addDays(ymd(), 2)); if (d) { S.pday = d; S.selMode = false; S.sel = new Set(); render(); } break; }
+    case 'pup': planMove(v, -1); break;
+    case 'pdn': planMove(v, 1); break;
+    case 'pmenu': await planMenu(v); break;
+    case 'predlog': await predlogPlana(); break;
+    case 'selmode': S.selMode = !S.selMode; S.sel = new Set(); rerender(); break;
+    case 'selrow': { S.sel = S.sel || new Set(); S.sel.has(v) ? S.sel.delete(v) : S.sel.add(v); rerender(); break; }
+    case 'seladd': { const d = S.pday || ymd(); const its = S.items.filter(x => S.sel.has(String(x.id))); const r = addToPlan(its, d); S.selMode = false; S.sel = new Set(); render(); toast(`Dodato u plan za ${dLabel(d)}: ${r.added}${r.skip ? ' (već u planu: ' + r.skip + ')' : ''}`); break; }
+    case 'mapa': go('mapa'); break;
+    case 'mapday': S.mapDay = v; render(); break;
+    case 'task': await openTask(v); break;
+    case 'newtask': await newTask(null); break;
+    case 'tktoggle': S.tkOpen = !S.tkOpen; rerender(); break;
+    case 'thread': openThread(v); break;
+    case 'towho': S.toWho = v; S.msgTxt = (document.querySelector('[data-i=msgtxt]') || {}).value || ''; rerender(); break;
+    case 'sendtpl': { const inp = document.querySelector('[data-i=msgtxt]'); const cur = inp ? inp.value.trim() : ''; sendMsg(cur && /…$/.test(v) ? v.replace(/…$/, ' ') + cur : v); break; }
+    case 'sendmsg': sendMsg((document.querySelector('[data-i=msgtxt]') || {}).value); break;
+    case 'msg2task': msgToTask(v); break;
+    case 'kplan': { const d = await pickDate('Dodaj u plan: ' + (S.cur.f.field_1 || '')); if (d) { const r = addToPlan([S.cur], d); toast(r.added ? 'Dodato u plan za ' + dLabel(d) + '.' : 'Već je u planu za ' + dLabel(d) + '.'); render(); } break; }
+    case 'ktask': await newTask(S.cur); break;
+    case 'kmsg': openThread(String(S.cur.f.Title)); break;
+    case 'kkonk': await addKonk(S.cur); break;
+    case 'kpin': go('pin'); break;
+    case 'pinsave': await pinSave(); break;
+    case 'pot': await setPot(S.cur, num(v)); break;
+    case 'newods': await newAbsence(); break;
+    case 'odsok': case 'odsno': { const o = S.X.ods.find(x => x.id === v); if (o) xSet('ods', o, { Status: a === 'odsok' ? 'odobreno' : 'odbijeno', Odobrio: me() }); render(); break; }
+    case 'wprev': S.week = addDays(S.week || weekStart(ymd()), -7); render(); break;
+    case 'wnext': S.week = addDays(S.week || weekStart(ymd()), 7); render(); break;
+    case 'wtoday': S.week = weekStart(ymd()); render(); break;
+    case 'nzprev': S.nzDay = addDays(S.nzDay || ymd(), -1); render(); break;
+    case 'nznext': S.nzDay = addDays(S.nzDay || ymd(), 1); render(); break;
+    case 'nztoday': S.nzDay = ymd(); render(); break;
+    case 'nzmail': { const w = window.open('', '_blank'); if (w) { w.document.write(reportHtml(S.nzDay || ymd(), S.planUser || komUsers()[0])); w.document.close(); } break; }
+    case 'adminsave': adminSave(); break;
+    case 'jr': S.jr = v; rerender(); break;
+    case 'juceok': await closeYesterday(); break;
+    case 'kdr': S.kd[el.dataset.k].r = v; rerender(); break;
+    case 'kda': { const k = S.kd[el.dataset.k]; if (v === 'date') { const d = await askDate('Prebaci na dan', k.d || nextWorkday(ymd())); if (!d) break; k.d = d; } k.a = v; rerender(); break; }
     case 'fclr': delete S.flt[v]; saveFlt(); render(); break;
     case 'fclrall': S.flt = {}; saveFlt(); render(); break;
     case 'obtoggle': S.obOpen = !S.obOpen; rerender(); break;
@@ -997,7 +1069,11 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('input', e => {
   const k = e.target.dataset.i; if (!k) return;
-  if (k === 'dq') { S.dq = e.target.value; S.showAll = false; const l = document.getElementById('dlist'); if (l) l.innerHTML = danasList(); return; }
+  if (k === 'pq') { S.pq = e.target.value; const y = scrollY; render(); const i = document.querySelector('[data-i=pq]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } scrollTo(0, y); return; }
+  if (k === 'msgtxt') { S.msgTxt = e.target.value; return; }
+  if (k === 'planuser') { S.planUser = e.target.value; render(); return; }
+  if (k.startsWith('kdt_')) { const x = S.kd[k.slice(4)]; if (x) x.t = e.target.value; return; }
+  if (k === 'dq') { S.dq = e.target.value; S.showAll = false; const l = document.getElementById('dlist'); if (l) l.innerHTML = danasList(); else { render(); const i = document.querySelector('[data-i=dq]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } } return; }
   if (k === 'q') { S.q = e.target.value; const l = document.getElementById('list'); if (l) l.innerHTML = kupciList().html; return; }
   if (k === 'optq') { const q = e.target.value.toLowerCase(); document.querySelectorAll('#opts .opt').forEach(b => b.style.display = b.textContent.toLowerCase().includes(q) ? '' : 'none'); return; }
   if (k === 'photo' || k === 'nphoto') return;
@@ -1036,6 +1112,624 @@ function shrink(file) {
 }
 
 /* ---------- učitavanje ---------- */
+/* ================= PLANIRANJE, ZADACI, PORUKE, KONKURENCIJA, ODSUSTVA, NADZOR, ADMIN ================= */
+const ROLES = Object.fromEntries(Object.entries(C.roles || {}).map(([k, v]) => [k.toLowerCase(), v]));
+const NAMES = Object.fromEntries(Object.entries(C.names || {}).map(([k, v]) => [k.toLowerCase(), v]));
+const role = () => DEMO ? (new URLSearchParams(location.search).get('role') || 'kom') : (ROLES[userName().toLowerCase()] || 'kom');
+const me = () => userName().toLowerCase();
+const isKom = () => role() === 'kom';
+const isAdmin = () => role() === 'admin';
+const nameOf = e => { e = String(e || '').toLowerCase(); return NAMES[e] || ({ kom: 'Komercijalista', op: 'Call centar', mag: 'Magacin', admin: 'Admin' })[e] || e.split('@')[0] || '—'; };
+const ROLE_N = { kom: 'Petar (komercijalista)', op: 'Call centar (Goca, Tamara)', mag: 'Magacin', admin: 'Admin' };
+const komUsers = () => Object.keys(ROLES).filter(k => ROLES[k] === 'kom');
+const ymd = d => { const x = d ? new Date(d) : new Date(); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
+const addDays = (s, n) => { const x = new Date(s + 'T12:00:00'); x.setDate(x.getDate() + n); return ymd(x); };
+const dLabel = s => { const t = ymd(); if (s === t) return 'danas'; if (s === addDays(t, 1)) return 'sutra'; if (s === addDays(t, 2)) return 'prekosutra'; if (s === addDays(t, -1)) return 'juče'; return new Date(s + 'T12:00:00').toLocaleDateString('sr-Latn-RS', { weekday: 'short', day: 'numeric', month: 'numeric' }); };
+const DOW = ['nedelja', 'ponedeljak', 'utorak', 'sreda', 'četvrtak', 'petak', 'subota'];
+
+/* ---------- liste ---------- */
+const XL = { plan: 'Plan poseta', zad: 'Zadaci', por: 'Poruke', ods: 'Odsustva', konk: 'Konkurencija', pod: 'Podešavanja' };
+const LS_X = 'ak_x_v1';
+S.X = { plan: [], zad: [], por: [], ods: [], konk: [], pod: [] }; S.XL = {};
+try { const x = JSON.parse(localStorage.getItem(LS_X) || 'null'); if (x) Object.assign(S.X, x); } catch (e) { }
+const saveX = () => { try { localStorage.setItem(LS_X, JSON.stringify(S.X)); } catch (e) { } };
+async function resolveX() {
+  if (Object.keys(S.XL).length) return;
+  await resolveList();
+  const lists = await g('/sites/' + S.site + '/lists?$select=id,displayName&$top=200');
+  Object.entries(XL).forEach(([k, n]) => { const l = lists.value.find(x => x.displayName === n); if (l) S.XL[k] = l.id; });
+}
+async function fetchX(k) {
+  if (!S.XL[k]) return;
+  let url = '/sites/' + S.site + '/lists/' + S.XL[k] + '/items?$expand=fields&$top=999';
+  const out = [];
+  while (url) { const j = await g(url); j.value.forEach(x => { const f = { ...x.fields }; ['@odata.etag', 'ContentType', 'Attachments', 'AuthorLookupId', 'EditorLookupId', '_UIVersionString', 'Edit', 'LinkTitleNoMenu', 'LinkTitle', 'ItemChildCount', 'FolderChildCount', '_ComplianceFlags', '_ComplianceTag', '_ComplianceTagWrittenTime', '_ComplianceTagUserId', 'AppAuthorLookupId', 'AppEditorLookupId'].forEach(z => delete f[z]); out.push({ id: String(x.id), f }); }); url = j['@odata.nextLink']; }
+  const pend = await DB.all();
+  const tmp = S.X[k].filter(x => String(x.id).startsWith('tmp'));
+  pend.filter(o => o.type === 'x' && o.k === k && o.act === 'patch').forEach(o => { const it = out.find(x => x.id === String(o.itemId)); if (it) Object.assign(it.f, o.fields); });
+  S.X[k] = out.concat(tmp);
+}
+async function fetchAllX(keys) {
+  if (DEMO) return;
+  await resolveX();
+  for (const k of keys || Object.keys(XL)) { try { await fetchX(k); } catch (e) { console.warn('x', k, e); } }
+  saveX();
+}
+function xAdd(k, fields) {
+  const it = { id: 'tmp' + Date.now() + Math.random().toString(36).slice(2, 6), f: { ...fields, Created: new Date().toISOString() } };
+  S.X[k].push(it); saveX();
+  queue({ type: 'x', k, act: 'create', tmp: it.id, fields });
+  return it;
+}
+function xSet(k, it, fields) {
+  Object.assign(it.f, fields); saveX();
+  queue({ type: 'x', k, act: 'patch', itemId: it.id, fields });
+}
+async function flushX(op) {
+  await resolveX();
+  if (!S.XL[op.k]) throw new Error('Nema liste ' + XL[op.k]);
+  if (op.act === 'create') {
+    const r = await g('/sites/' + S.site + '/lists/' + S.XL[op.k] + '/items', { method: 'POST', body: JSON.stringify({ fields: op.fields }) });
+    const it = S.X[op.k].find(x => x.id === op.tmp); if (it) it.id = String(r.id);
+    for (const o of await DB.all()) if (o.type === 'x' && String(o.itemId) === op.tmp) { o.itemId = String(r.id); await DB.put(o); }
+    saveX();
+  } else {
+    if (String(op.itemId).startsWith('tmp')) return false;
+    await g('/sites/' + S.site + '/lists/' + S.XL[op.k] + '/items/' + op.itemId + '/fields', { method: 'PATCH', body: JSON.stringify(op.fields) });
+  }
+  return true;
+}
+
+/* ---------- podešavanja (admin) ---------- */
+const DEF_SET = {
+  moduli: { '*': { plan: 1, zad: 1, por: 1, konk: 1, pot: 1, ods: 1, mapa: 1 } },
+  podsetnik: '17:30',
+  konkurenti: ['Špajz', 'Viva', 'Macrobiotic', 'NS COM', 'Mrvica'],
+  praznici: ['2026-01-01', '2026-01-02', '2026-01-07', '2026-02-16', '2026-02-17', '2026-04-10', '2026-04-11', '2026-04-12', '2026-04-13', '2026-05-01', '2026-05-02', '2026-11-11', '2027-01-01', '2027-01-02', '2027-01-07', '2027-02-15', '2027-02-16', '2027-04-30', '2027-05-01', '2027-05-02', '2027-05-03', '2027-05-04', '2027-11-11'],
+  sabloni: {
+    op2kom: ['Pitaj za neplaćenu fakturu', 'Ponudi aktuelnu akciju', 'Kupac se žali na dostavu, proveri', 'Kupac nije naručio duže vreme, obiđi ga', 'Donesi katalog / cenovnik', 'Proveri policu i izlaganje', 'Kupac traži da ga posetiš'],
+    kom2op: ['Kupac traži poziv', 'Kupac želi da naruči', 'Promenio kontakt osobu', 'Zatvorio objekat', 'Nezadovoljan cenom', 'Nezadovoljan dostavom', 'Traži cenovnik / katalog', 'Pošalji mu ponudu'],
+    kom2mag: ['Ima li na stanju…', 'Kada stiže roba…', 'Kupac prijavio oštećenu robu', 'Kupac prijavio pogrešnu robu', 'Fali roba u isporuci'],
+    odgovori: ['Urađeno', 'Kupac nije bio tu', 'Plaća do petka', 'Odbija', 'Javiće se', 'Treba mi još informacija', 'Na stanju je', 'Nema na stanju', 'Stiže sledeće nedelje']
+  },
+  razlozi: ['nije stigao, nestalo vremena', 'kupac zatvoren ili odsutan', 'promena plana, hitno drugo', 'kupac otkazao ili tražio drugi termin', 'put ili vreme', 'ostalo'],
+  vrsteOdsustva: ['godišnji odmor', 'bolovanje', 'slobodan dan', 'službeno drugde', 'ostalo'],
+  predlogBroj: 12,
+  kpi: { posetaDnevno: null, postovanjePlana: null, primarniZadaci: null },
+  pragoviPotencijala: { 1: '', 2: '', 3: '', 4: '', 5: '' }
+};
+function getSet(k) {
+  const it = S.X.pod.find(x => x.f.Title === k);
+  if (it) { try { return JSON.parse(it.f.Vrednost); } catch (e) { } }
+  return JSON.parse(JSON.stringify(DEF_SET[k]));
+}
+function putSet(k, v) {
+  const it = S.X.pod.find(x => x.f.Title === k), val = JSON.stringify(v);
+  if (it) xSet('pod', it, { Vrednost: val, Izmenio: me() }); else xAdd('pod', { Title: k, Vrednost: val, Izmenio: me() });
+}
+const MODS = [['plan', 'Planiranje'], ['zad', 'Zadaci'], ['por', 'Poruke'], ['konk', 'Konkurencija'], ['pot', 'Potencijal 1–5'], ['ods', 'Odsustva'], ['mapa', 'Mapa i ruta']];
+function modOn(m, user) {
+  const s = getSet('moduli'), u = (user || me()).toLowerCase();
+  const v = s[u] && m in s[u] ? s[u][m] : s['*'] && m in s['*'] ? s['*'][m] : 1;
+  return !!v;
+}
+const isHoliday = s => getSet('praznici').includes(s);
+function absentOn(s, user) { return S.X.ods.some(o => (o.f.Korisnik || '').toLowerCase() === (user || me()) && o.f.Status !== 'odbijeno' && o.f.Od <= s && s <= o.f.Do); }
+function nextWorkday(s, user) { let d = addDays(s, 1); for (let i = 0; i < 30; i++) { const w = new Date(d + 'T12:00:00').getDay(); if (w !== 0 && !isHoliday(d) && !absentOn(d, user)) return d; d = addDays(d, 1); } return d; }
+
+/* ---------- plan ---------- */
+const planOfDay = (s, user) => S.X.plan.filter(p => p.f.Datum === s && (p.f.Korisnik || '').toLowerCase() === (user || me()).toLowerCase() && !['izbačen', 'prebačen'].includes(p.f.Status)).sort((a, b) => num(a.f.Redosled) - num(b.f.Redosled));
+const itemBySifra = s => S.items.find(x => String(x.f.Title) === String(s));
+function visitedOn(sifra, s, user) {
+  return S.log.some(e => e.s === String(sifra) && /POSETE/.test(e.t) && e.v && ymd(e.v) === s && (!user || (e.k || '').toLowerCase() === user.toLowerCase()));
+}
+function addToPlan(its, s, user) {
+  user = (user || me()).toLowerCase();
+  const cur = planOfDay(s, user); let n = cur.length ? num(cur[cur.length - 1].f.Redosled) : 0, added = 0, skip = 0;
+  its.forEach(it => {
+    if (cur.some(p => p.f.Title === String(it.f.Title))) { skip++; return; }
+    xAdd('plan', { Title: String(it.f.Title), KupacId: String(it.id), KupacNaziv: it.f.field_1 || '', Datum: s, Redosled: ++n, Korisnik: user, Status: 'planiran', Dodao: me() });
+    added++;
+  });
+  return { added, skip };
+}
+async function pickDate(title, sug) {
+  const t = ymd();
+  const opts = [['d:' + addDays(t, 1), 'Sutra', dLabel(addDays(t, 1)) + ' · ' + DOW[new Date(addDays(t, 1) + 'T12:00:00').getDay()]], ['d:' + addDays(t, 2), 'Prekosutra', DOW[new Date(addDays(t, 2) + 'T12:00:00').getDay()]], ['d:' + t, 'Danas', ''], ['cal', '📅 Izaberi datum', '']];
+  if (sug) opts.unshift(['d:' + sug, 'Sledeći radni dan', dLabel(sug)]);
+  const c = await askChoice(title, opts);
+  if (!c) return null;
+  if (c.startsWith('d:')) return c.slice(2);
+  return await askDate(title);
+}
+function askDate(title, val) {
+  return new Promise(res => {
+    const m = document.createElement('div'); m.className = 'modal';
+    m.innerHTML = `<div class="box"><div class="mh"><h2>${esc(title)}</h2><button class="x" data-m="x">✕</button></div><input type="date" class="dinp" value="${val || addDays(ymd(), 1)}" min="${ymd()}"><div class="mbtn"><button class="btn" data-m="x">Odustani</button><button class="btn pri" data-m="ok">Izaberi</button></div></div>`;
+    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); const v = m.querySelector('input').value; modalDone(m, () => res(b && b.dataset.m === 'ok' && v ? v : null)); });
+    modalOpen(m, () => { m.remove(); res(null); });
+  });
+}
+function askText(title, ph, val) {
+  return new Promise(res => {
+    const m = document.createElement('div'); m.className = 'modal';
+    m.innerHTML = `<div class="box"><div class="mh"><h2>${esc(title)}</h2><button class="x" data-m="x">✕</button></div><textarea class="dinp" rows="3" placeholder="${esc(ph || '')}">${esc(val || '')}</textarea><div class="mbtn"><button class="btn" data-m="x">Odustani</button><button class="btn pri" data-m="ok">Sačuvaj</button></div></div>`;
+    m.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== m) return; e.stopPropagation(); const v = m.querySelector('textarea').value; modalDone(m, () => res(b && b.dataset.m === 'ok' ? v : null)); });
+    modalOpen(m, () => { m.remove(); res(null); });
+  });
+}
+function planRowHtml(p, i, s, user) {
+  const it = itemBySifra(p.f.Title), f = it ? it.f : { field_1: p.f.KupacNaziv, Title: p.f.Title };
+  const done = p.f.Status === 'obiđen' || visitedOn(p.f.Title, s, user), act = S.visit && it && S.visit.id === it.id;
+  return `<div class="prow ${done ? 'done' : ''}">
+    <div class="pn">${done ? '✓' : i + 1}</div>
+    <div class="grow" data-a="${it ? 'kupac' : ''}" data-v="${it ? esc(it.id) : ''}"><div class="t ell">${esc(f.field_1 || f.Title)}</div><div class="s ell">${esc([f.field_3, f.field_4].filter(Boolean).join(', ') || '')}</div>${p.f.Napomena ? `<div class="s2">📝 ${esc(p.f.Napomena)}</div>` : ''}${act ? '<span class="badge ok">poseta u toku</span>' : ''}${(p.f.Dodao || '').toLowerCase() !== (p.f.Korisnik || '').toLowerCase() ? `<div class="s">dodao: ${esc(nameOf(p.f.Dodao))}</div>` : ''}</div>
+    <div class="pact"><button data-a="pup" data-v="${p.id}" aria-label="Gore">▲</button><button data-a="pdn" data-v="${p.id}" aria-label="Dole">▼</button><button data-a="pmenu" data-v="${p.id}" aria-label="Više">⋯</button></div>
+  </div>`;
+}
+function planBlock(s) {
+  if (!modOn('plan')) return '';
+  const user = me(), P = planOfDay(s, user), done = P.filter(p => p.f.Status === 'obiđen' || visitedOn(p.f.Title, s, user)).length;
+  const next = s === ymd() ? P.find(p => !(p.f.Status === 'obiđen' || visitedOn(p.f.Title, s, user))) : null, nit = next && itemBySifra(next.f.Title);
+  const nl = nit && parseLoc(nit.f.Lokacija), nav = nit ? (nl ? `https://www.google.com/maps/dir/?api=1&destination=${nl.lat},${nl.lon}` : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent([nit.f.field_3, nit.f.field_4].filter(Boolean).join(', ') + ', Srbija')}`) : '';
+  return `<div class="sech"><span>Plan · ${dLabel(s)} · ${P.length ? `obiđeno ${done} od ${P.length}` : 'prazan'}</span><span>${P.length && modOn('mapa') ? '<button class="lnk" data-a="mapa">🗺 Mapa</button>' : ''}</span></div>
+    ${P.length ? `<div class="pbar"><i style="width:${Math.round(done / P.length * 100)}%"></i></div>` : ''}
+    ${nit ? `<div class="card next"><div class="grow"><div class="s">Sledeći kupac</div><div class="t">${esc(nit.f.field_1 || nit.f.Title)}</div></div><a class="btn pri" href="${esc(nav)}" target="_blank" rel="noopener">➤ Vozi</a></div>` : ''}
+    ${P.map((p, i) => planRowHtml(p, i, s, user)).join('')}
+    ${P.length && done === P.length && s === ymd() ? '<div class="card ok">🎉 Plan za danas je ispunjen. Svaka čast!</div>' : ''}
+    <div class="pbtns2"><button class="btn" data-a="predlog">✨ Predlog plana</button><button class="btn" data-a="selmode">${S.selMode ? '✕ Prekini biranje' : '☑ Biraj kupce'}</button></div>`;
+}
+async function planMenu(id) {
+  const p = S.X.plan.find(x => x.id === id); if (!p) return;
+  const c = await askChoice(p.f.KupacNaziv || p.f.Title, [['nap', '📝 Napomena', p.f.Napomena || 'npr. doneti katalog'], ['mov', '📅 Prebaci na drugi dan', ''], ['del', '✕ Izbaci iz plana', '']]);
+  if (c === 'nap') { const t = await askText('Napomena', 'npr. doneti katalog, pitati za fakturu', p.f.Napomena); if (t !== null) xSet('plan', p, { Napomena: t, Izmenio: me() }); }
+  if (c === 'mov') { const d = await pickDate('Prebaci na dan', nextWorkday(p.f.Datum)); if (d) movePlan(p, d, 'premešteno'); }
+  if (c === 'del') { if (await askSure('Izbaci iz plana', `<p>Izbaciti <b>${esc(p.f.KupacNaziv)}</b> iz plana za ${dLabel(p.f.Datum)}?</p>`, 'Izbaci')) xSet('plan', p, { Status: 'izbačen', Izmenio: me() }); }
+  render();
+}
+function movePlan(p, d, razlog) {
+  xSet('plan', p, { Status: 'prebačen', Razlog: razlog || '', Izmenio: me() });
+  const it = itemBySifra(p.f.Title) || { id: p.f.KupacId, f: { Title: p.f.Title, field_1: p.f.KupacNaziv } };
+  addToPlan([it], d, p.f.Korisnik);
+  const np = S.X.plan[S.X.plan.length - 1]; if (np && p.f.Napomena) np.f.Napomena = p.f.Napomena;
+}
+function planMove(id, dir) {
+  const p = S.X.plan.find(x => x.id === id); if (!p) return;
+  const P = planOfDay(p.f.Datum, p.f.Korisnik), i = P.indexOf(p), j = i + dir; if (j < 0 || j >= P.length) return;
+  [P[i], P[j]] = [P[j], P[i]];
+  P.forEach((x, n) => { if (num(x.f.Redosled) !== n + 1) xSet('plan', x, { Redosled: n + 1, Izmenio: me() }); });
+  render();
+}
+function markPlanVisited(it) {
+  const p = planOfDay(ymd()).find(x => x.f.Title === String(it.f.Title));
+  if (p && p.f.Status !== 'obiđen') xSet('plan', p, { Status: 'obiđen' });
+}
+async function predlogPlana() {
+  const s = S.pday || ymd(), D = danasData();
+  const pool = D ? D.rows.filter(r => r.d && (r.d.top || r.d.over >= -7)).map(r => r.it).concat(D.ob) : [];
+  if (!pool.length) { toast('Prvo izaberi pravac (i filtere) za koji praviš plan.'); return; }
+  const already = planOfDay(s).map(p => p.f.Title), cand = pool.filter(it => !already.includes(String(it.f.Title))).slice(0, getSet('predlogBroj') || 12);
+  if (!cand.length) { toast('Svi kupci na redu su već u planu.'); return; }
+  const r = await pickSheet(`Predlog plana · ${dLabel(s)}`, [['k', 'Kupci', cand.map(it => [it.f.field_1 + ' · ' + (it.f.field_4 || ''), klasaOf(it) || '']), cand.map(it => it.f.field_1 + ' · ' + (it.f.field_4 || ''))]]);
+  if (!r) return;
+  const pick = cand.filter(it => r.k.includes(it.f.field_1 + ' · ' + (it.f.field_4 || '')));
+  const x = addToPlan(pick, s); toast(`Dodato u plan: ${x.added}`); render();
+}
+
+/* ---------- kraj dana: neobiđeni iz plana ---------- */
+function unvisitedPlan(s) { return planOfDay(s).filter(p => p.f.Status !== 'obiđen' && !visitedOn(p.f.Title, s, me())); }
+S.kd = {}; // id plana -> {r: razlog, a: 'next'|'date'|'del', d: datum, t: tekst}
+function krajPlanHtml() {
+  if (!modOn('plan')) return '';
+  const U = unvisitedPlan(ymd()); if (!U.length) return '';
+  const R = getSet('razlozi');
+  return `<h2>Neobiđeni iz plana · ${U.length}</h2><p class="s">Za svakog izaberi razlog i šta dalje.</p>` + U.map(p => {
+    const k = S.kd[p.id] || (S.kd[p.id] = { a: 'next', d: nextWorkday(ymd()) });
+    return `<div class="card kd"><div class="t">${esc(p.f.KupacNaziv || p.f.Title)}</div>
+      <div class="chipsel">${R.map(r => `<button class="${k.r === r ? 'on' : ''}" data-a="kdr" data-k="${p.id}" data-v="${esc(r)}">${esc(r)}</button>`).join('')}</div>
+      ${k.r === 'ostalo' ? `<input class="dinp" data-i="kdt_${p.id}" placeholder="Upiši razlog" value="${esc(k.t || '')}">` : ''}
+      <div class="seg" style="margin-top:8px"><button class="${k.a === 'next' ? 'on' : ''}" data-a="kda" data-k="${p.id}" data-v="next">${dLabel(nextWorkday(ymd()))}</button><button class="${k.a === 'date' ? 'on' : ''}" data-a="kda" data-k="${p.id}" data-v="date">${k.a === 'date' && k.d ? dLabel(k.d) : '📅 drugi dan'}</button><button class="${k.a === 'del' ? 'on' : ''}" data-a="kda" data-k="${p.id}" data-v="del">izbaci</button></div></div>`;
+  }).join('');
+}
+function krajPlanCheck() {
+  const U = unvisitedPlan(ymd());
+  for (const p of U) { const k = S.kd[p.id]; if (!k || !k.r || (k.r === 'ostalo' && !String(k.t || '').trim())) return 'Za svakog neobiđenog kupca iz plana izaberi razlog.'; }
+  return '';
+}
+async function krajPlanApply() {
+  for (const p of unvisitedPlan(ymd())) {
+    const k = S.kd[p.id], razlog = k.r === 'ostalo' ? 'ostalo: ' + k.t.trim() : k.r, it = itemBySifra(p.f.Title);
+    if (k.a === 'del') xSet('plan', p, { Status: 'izbačen', Razlog: razlog, Izmenio: me() });
+    else movePlan(p, k.a === 'date' && k.d ? k.d : nextWorkday(ymd()), razlog);
+    await logEvent('PLAN NIJE OBIĐEN', null, it || { id: p.f.KupacId, f: { Title: p.f.Title, field_1: p.f.KupacNaziv } }, { Napomena: razlog + (k.a === 'del' ? ' · izbačen iz plana' : ' · prebačen na ' + (k.a === 'date' && k.d ? k.d : nextWorkday(ymd()))) });
+  }
+  S.kd = {};
+}
+
+/* ---------- dnevni izveštaj mejlom ---------- */
+function reportHtml(s, user) {
+  user = (user || me()).toLowerCase();
+  const ev = S.log.filter(e => e.v && ymd(e.v) === s && (e.k || '').toLowerCase() === user);
+  const st = ev.find(e => e.t === 'POČETAK DANA'), en = ev.filter(e => e.t === 'KRAJ DANA').pop();
+  const vis = []; const open = {};
+  ev.forEach(e => { if (e.t === 'POČETAK POSETE') { open[e.s] = { n: e.n, s: e.v, m: e.m }; vis.push(open[e.s]); } if (e.t === 'KRAJ POSETE' && open[e.s]) { open[e.s].e = e.v; open[e.s].res = e.m; } });
+  const P = S.X.plan.filter(p => p.f.Datum === s && (p.f.Korisnik || '').toLowerCase() === user && p.f.Status !== 'izbačen' || (p.f.Datum === s && p.f.Status === 'prebačen' && (p.f.Korisnik || '').toLowerCase() === user));
+  const nis = ev.filter(e => e.t === 'PLAN NIJE OBIĐEN'), bel = ev.filter(e => e.t === 'BELEŠKA');
+  const zd = S.X.zad.filter(z => z.f.Uradjeno && ymd(z.f.Uradjeno) === s && (z.f.Uradio || '').toLowerCase() === user);
+  const td = (a) => `<td style="padding:4px 8px;border-bottom:1px solid #ddd">${a}</td>`;
+  return `<div style="font-family:Arial,sans-serif;font-size:14px"><h2 style="margin:0 0 6px">Dnevni izveštaj · ${esc(nameOf(user))} · ${new Date(s + 'T12:00:00').toLocaleDateString('sr-RS')}</h2>
+    <p>Radni dan: <b>${st ? hhmm(st.v) : '—'}</b> – <b>${en ? hhmm(en.v) : '—'}</b> · Posete: <b>${vis.length}</b> · Plan: <b>${P.length}</b> · Neobiđeno: <b>${nis.length}</b> · Beleške: <b>${bel.length}</b> · Urađeni zadaci: <b>${zd.length}</b></p>
+    <h3>Posete</h3><table style="border-collapse:collapse">${vis.map(v => `<tr>${td(esc(v.n))}${td(hhmm(v.s) + '–' + (v.e ? hhmm(v.e) : '?'))}${td(v.e ? Math.max(1, Math.round((Date.parse(v.e) - Date.parse(v.s)) / 60000)) + ' min' : '')}${td(esc(v.res || ''))}${td(/BEZ GPS/.test(v.m || '') ? 'bez GPS-a' : '')}</tr>`).join('') || '<tr><td>—</td></tr>'}</table>
+    ${nis.length ? `<h3>Neobiđeni iz plana</h3><table style="border-collapse:collapse">${nis.map(e => `<tr>${td(esc(e.n))}${td(esc(e.m))}</tr>`).join('')}</table>` : ''}
+    ${bel.length ? `<h3>Beleške</h3><table style="border-collapse:collapse">${bel.map(e => `<tr>${td(esc(e.n))}${td(esc(e.m))}</tr>`).join('')}</table>` : ''}
+    ${zd.length ? `<h3>Urađeni zadaci</h3><table style="border-collapse:collapse">${zd.map(z => `<tr>${td(esc(z.f.Title))}${td(esc(z.f.KupacNaziv || ''))}${td(esc(z.f.Izvrsenje || ''))}</tr>`).join('')}</table>` : ''}
+    <p style="color:#888;font-size:12px">Automatski izveštaj aplikacije Audit kupaca.</p></div>`;
+}
+async function sendReport(s) {
+  const to = C.reportTo; if (!to || DEMO) return 'probni režim';
+  try {
+    const t = (await S.pca.acquireTokenSilent({ scopes: ['Mail.Send'], account: S.account })).accessToken;
+    const r = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: { subject: `Dnevni izveštaj · ${nameOf(me())} · ${new Date(s + 'T12:00:00').toLocaleDateString('sr-RS')}`, body: { contentType: 'HTML', content: reportHtml(s) }, toRecipients: [{ emailAddress: { address: to } }] }, saveToSentItems: true }) });
+    if (!r.ok) throw new Error(r.status);
+    return '';
+  } catch (e) { console.warn('mail', e); return 'mejl nije poslat (' + String(e.message || e).slice(0, 40) + ')'; }
+}
+
+/* ---------- zadaci ---------- */
+const PRI = { 1: ['primarni', 'p1'], 2: ['sekundarni', 'p2'], 3: ['tercijarni', 'p3'] };
+const myTasks = () => S.X.zad.filter(z => z.f.Status !== 'urađen' && z.f.Status !== 'otkazan' && ((z.f.Za || '').toLowerCase() === me() || z.f.Za === role()));
+const custTasks = sifra => S.X.zad.filter(z => z.f.KupacSifra === String(sifra) && z.f.Status !== 'otkazan');
+function taskHtml(z, withCust) {
+  const p = PRI[num(z.f.Prioritet) || 2], late = z.f.Rok && z.f.Status !== 'urađen' && z.f.Rok < ymd();
+  return `<div class="task ${p[1]} ${z.f.Status === 'urađen' ? 'done' : ''}" data-a="task" data-v="${z.id}"><div class="pr">${p[0]}</div><div class="grow"><div class="t">${z.f.Status === 'urađen' ? '✓ ' : ''}${esc(z.f.Title)}</div>${z.f.Opis ? `<div class="s">${esc(z.f.Opis)}</div>` : ''}<div class="s">${withCust && z.f.KupacNaziv ? '🏪 ' + esc(z.f.KupacNaziv) + ' · ' : ''}od: ${esc(nameOf(z.f.Zadao))}${z.f.Za ? ' → ' + esc(nameOf(z.f.Za)) : ''}${z.f.Rok ? ` · rok ${late ? '<b class="late">' : ''}${dLabel(z.f.Rok)}${late ? '</b>' : ''}` : ''}</div>${z.f.Status === 'urađen' ? `<div class="s2">✓ ${esc(z.f.Izvrsenje || '')} · ${esc(nameOf(z.f.Uradio))}</div>` : ''}</div></div>`;
+}
+function tasksBlock() {
+  if (!modOn('zad')) return '';
+  const T = myTasks().filter(z => !z.f.KupacSifra).sort((a, b) => num(a.f.Prioritet) - num(b.f.Prioritet) || String(a.f.Rok || '9').localeCompare(String(b.f.Rok || '9')));
+  const TK = myTasks().filter(z => z.f.KupacSifra);
+  return `<div class="sech"><span>Moji zadaci · ${T.length + TK.length}</span><button class="lnk" data-a="newtask">＋ Zadatak</button></div>${T.map(z => taskHtml(z)).join('')}${TK.length ? `<button class="sec" data-a="tktoggle">${S.tkOpen ? '▾' : '▸'} Zadaci kod kupaca · ${TK.length}</button>${S.tkOpen ? TK.map(z => taskHtml(z, true)).join('') : ''}` : ''}${!T.length && !TK.length ? '<div class="s" style="margin:0 2px 8px">Nema otvorenih zadataka.</div>' : ''}`;
+}
+async function newTask(it) {
+  const forOpts = isKom() ? [['me', 'Za mene', ''], ['op', 'Za call centar', 'Goca, Tamara'], ['mag', 'Za magacin', '']] : [['kom', 'Za Petra (komercijalista)', ''], ['op', 'Za call centar', ''], ['mag', 'Za magacin', '']];
+  const za = await askChoice('Nov zadatak' + (it ? ' · ' + (it.f.field_1 || '') : ''), forOpts); if (!za) return;
+  const S2 = getSet('sabloni'), tpl = za === 'mag' ? S2.kom2mag : (za === 'op' ? S2.kom2op : S2.op2kom);
+  const r = await taskForm(tpl); if (!r) return;
+  xAdd('zad', { Title: r.title, Opis: r.opis || '', Prioritet: r.pri, KupacSifra: it ? String(it.f.Title) : '', KupacNaziv: it ? it.f.field_1 || '' : '', Rok: r.rok || '', Zadao: me(), Za: za === 'me' ? me() : za, Status: 'otvoren' });
+  toast('Zadatak je zadat.'); render();
+}
+function taskForm(tpl) {
+  return new Promise(res => {
+    const st = { title: '', pri: 2, rok: '', opis: '' };
+    const m = document.createElement('div'); m.className = 'modal sheet';
+    const paint = () => m.innerHTML = `<div class="box"><div class="mh"><h2>Zadatak</h2><button class="x" data-m="x">✕</button></div><div class="sbody">
+      <div class="sh">Šta (izaberi ili upiši)</div><div class="chipsel">${tpl.map(t => `<button class="${st.title === t ? 'on' : ''}" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+      <input class="dinp" data-f="title" placeholder="ili upiši zadatak" value="${esc(st.title)}">
+      <div class="sh">Prioritet</div><div class="seg">${[1, 2, 3].map(p => `<button class="${st.pri === p ? 'on' : ''}" data-p="${p}">${PRI[p][0]}</button>`).join('')}</div>
+      <div class="sh">Rok (nije obavezan)</div><input type="date" class="dinp" data-f="rok" value="${st.rok}">
+      <div class="sh">Napomena</div><input class="dinp" data-f="opis" value="${esc(st.opis)}"></div>
+      <div class="mbtn"><button class="btn" data-m="x">Odustani</button><button class="btn pri" data-m="ok">Zadaj</button></div></div>`;
+    paint();
+    const sync = () => m.querySelectorAll('[data-f]').forEach(i => st[i.dataset.f] = i.value);
+    m.addEventListener('click', e => {
+      e.stopPropagation(); const t = e.target.closest('[data-t]'), p = e.target.closest('[data-p]'), b = e.target.closest('[data-m]');
+      if (t) { sync(); st.title = t.dataset.t; paint(); return; }
+      if (p) { sync(); st.pri = +p.dataset.p; paint(); return; }
+      if (b && b.dataset.m === 'ok') { sync(); if (!st.title.trim()) { m.querySelector('[data-f=title]').focus(); return; } modalDone(m, () => res({ ...st, title: st.title.trim() })); return; }
+      if (b || e.target === m) { modalDone(m, () => res(null)); }
+    });
+    modalOpen(m, () => { m.remove(); res(null); });
+  });
+}
+async function openTask(id) {
+  const z = S.X.zad.find(x => x.id === id); if (!z) return;
+  if (z.f.Status === 'urađen') { if (await askSure('Zadatak je urađen', `<p><b>${esc(z.f.Title)}</b></p><p>${esc(z.f.Izvrsenje || '')}</p><p class="s">${esc(nameOf(z.f.Uradio))} · ${fmtDate(z.f.Uradjeno)}</p>`, 'Vrati kao otvoren')) { xSet('zad', z, { Status: 'otvoren' }); render(); } return; }
+  const ans = getSet('sabloni').odgovori;
+  const opts = ans.map(a => ['a:' + a, a, '']).concat([['txt', '✍ Upiši šta je urađeno', ''], ['msg', '💬 Napiši poruku o ovome', ''], ...(z.f.Zadao === me() || isAdmin() ? [['cancel', '✕ Otkaži zadatak', '']] : [])]);
+  const c = await askChoice('✓ ' + z.f.Title, opts); if (!c) return;
+  if (c === 'cancel') { xSet('zad', z, { Status: 'otkazan' }); render(); return; }
+  if (c === 'msg') { openThread(z.f.KupacSifra || '', z.f.Title); return; }
+  let txt = c.startsWith('a:') ? c.slice(2) : await askText('Šta je urađeno', '', ''); if (txt === null) return;
+  xSet('zad', z, { Status: 'urađen', Izvrsenje: txt, Uradio: me(), Uradjeno: new Date().toISOString() });
+  if (z.f.KupacSifra) { const it = itemBySifra(z.f.KupacSifra); await logEvent('ZADATAK', null, it || null, { Napomena: z.f.Title + ' → ' + txt }); }
+  toast('Zadatak je označen kao urađen.'); render();
+}
+
+/* ---------- poruke ---------- */
+const forMe = m => { const z = (m.f.Za || '').toLowerCase(); return z === me() || z === role() || (z === 'svi'); };
+const unread = m => (m.f.Od || '').toLowerCase() !== me() && forMe(m) && !String(m.f.Procitali || '').toLowerCase().split(',').includes(me());
+const unreadCount = () => modOn('por') ? S.X.por.filter(unread).length + (isKom() ? 0 : 0) : 0;
+function threads() {
+  const T = {};
+  S.X.por.forEach(m => { const k = m.f.KupacSifra || ''; (T[k] = T[k] || { k, n: m.f.KupacNaziv || 'Opšte poruke', msgs: [] }).msgs.push(m); });
+  return Object.values(T).map(t => { t.msgs.sort((a, b) => String(a.f.Vreme).localeCompare(String(b.f.Vreme))); t.last = t.msgs[t.msgs.length - 1]; t.un = t.msgs.filter(unread).length; return t; }).sort((a, b) => String(b.last.f.Vreme).localeCompare(String(a.last.f.Vreme)));
+}
+function vPoruke() {
+  const T = threads(), q = norm(S.pq || '');
+  const L = T.filter(t => !q || norm(t.n).includes(q));
+  return bar('Poruke') + `<main class="main">
+    <div class="fsel srch"><span class="ic">🔍</span><input type="search" data-i="pq" placeholder="Pretraži razgovore po kupcu" value="${esc(S.pq || '')}"></div>
+    <button class="btn" style="width:100%;margin-bottom:10px" data-a="thread" data-v="">💬 Opšte poruke${(T.find(t => t.k === '') || {}).un ? ` <span class="bdg">${T.find(t => t.k === '').un}</span>` : ''}</button>
+    ${L.filter(t => t.k).map(t => `<div class="row" data-a="thread" data-v="${esc(t.k)}"><div class="grow"><div class="t ell">${esc(t.n)}</div><div class="s ell">${esc(nameOf(t.last.f.Od))}: ${esc(t.last.f.Title)}</div></div><div class="right"><div class="s">${dLabel(ymd(t.last.f.Vreme))}</div>${t.un ? `<span class="bdg">${t.un}</span>` : ''}</div></div>`).join('') || '<div class="empty">Još nema razgovora o kupcima. Poruku o kupcu šalješ sa njegove kartice (💬).</div>'}
+  </main>` + tabs('poruke');
+}
+function openThread(k, prefill) { S.thr = k; S.thrPre = prefill || ''; S.from2 = S.view; go('thread'); }
+function vThread() {
+  const k = S.thr || '', it = k ? itemBySifra(k) : null, T = S.X.por.filter(m => (m.f.KupacSifra || '') === k).sort((a, b) => String(a.f.Vreme).localeCompare(String(b.f.Vreme)));
+  T.filter(unread).forEach(m => xSet('por', m, { Procitali: [String(m.f.Procitali || ''), me()].filter(Boolean).join(',') }));
+  const S2 = getSet('sabloni'), tpl = isKom() ? (S.toWho === 'mag' ? S2.kom2mag : S2.kom2op) : S2.op2kom;
+  const who = S.toWho || (isKom() ? 'op' : 'kom');
+  const tos = isKom() ? [['op', 'Call centar'], ['mag', 'Magacin'], ['admin', 'Admin']] : [['kom', 'Petar'], ['op', 'Call centar'], ['mag', 'Magacin']];
+  return bar(it ? it.f.field_1 || k : (k ? 'Razgovor · ' + k : 'Opšte poruke'), true) + `<main class="main chat">
+    ${it ? `<button class="lnk" data-a="kupac" data-v="${esc(it.id)}">› Otvori karticu kupca</button>` : ''}
+    ${T.map(m => { const mine = (m.f.Od || '').toLowerCase() === me(); return `<div class="msg ${mine ? 'me' : ''}"><div class="mt">${esc(m.f.Title)}</div>${m.f.Tekst && m.f.Tekst !== m.f.Title ? `<div class="mx">${esc(m.f.Tekst)}</div>` : ''}<div class="mm">${esc(nameOf(m.f.Od))} → ${esc(nameOf(m.f.Za))} · ${dLabel(ymd(m.f.Vreme))} ${hhmm(m.f.Vreme)}${m.f.ZadatakId ? ' · ✓ postao zadatak' : ''}${!mine && !m.f.ZadatakId ? ` · <button class="lnk" data-a="msg2task" data-v="${m.id}">→ zadatak za mene</button>` : ''}</div></div>`; }).join('') || '<div class="empty">Još nema poruka. Izaberi gotovu poruku ispod ili upiši svoju.</div>'}
+  </main><div class="foot chatfoot"><div class="in" style="flex-direction:column;align-items:stretch">
+    <div class="seg">${tos.map(([v, n]) => `<button class="${who === v ? 'on' : ''}" data-a="towho" data-v="${v}">${n}</button>`).join('')}</div>
+    <div class="chipsel tpl">${tpl.concat(S2.odgovori).map(t => `<button data-a="sendtpl" data-v="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <div style="display:flex;gap:8px"><input class="dinp" style="margin:0;flex:1" data-i="msgtxt" placeholder="Upiši poruku…" value="${esc(S.msgTxt || S.thrPre || '')}"><button class="btn pri" data-a="sendmsg">Pošalji</button></div>
+  </div></div>`;
+}
+function sendMsg(text) {
+  text = String(text || '').trim(); if (!text) return;
+  const k = S.thr || '', it = k ? itemBySifra(k) : null, who = S.toWho || (isKom() ? 'op' : 'kom');
+  xAdd('por', { Title: text.slice(0, 250), Tekst: text, Od: me(), Za: who, KupacSifra: k, KupacNaziv: it ? it.f.field_1 || '' : (k ? k : ''), Vreme: new Date().toISOString(), Procitali: me() });
+  S.msgTxt = ''; S.thrPre = ''; render(); scrollTo(0, document.body.scrollHeight);
+}
+function msgToTask(id) {
+  const m = S.X.por.find(x => x.id === id); if (!m) return;
+  const z = xAdd('zad', { Title: m.f.Title, Opis: m.f.Tekst !== m.f.Title ? m.f.Tekst || '' : '', Prioritet: 2, KupacSifra: m.f.KupacSifra || '', KupacNaziv: m.f.KupacNaziv || '', Zadao: m.f.Od, Za: me(), Status: 'otvoren' });
+  xSet('por', m, { ZadatakId: 1 }); toast('Poruka je postala tvoj zadatak.'); render();
+}
+
+/* ---------- konkurencija ---------- */
+function konkForm(it) {
+  return new Promise(res => {
+    const st = { k: new Set(), g: new Set(), c: '', u: '', n: '', o: '' };
+    const KO = getSet('konkurenti');
+    const m = document.createElement('div'); m.className = 'modal sheet';
+    const paint = () => m.innerHTML = `<div class="box"><div class="mh"><h2>Konkurencija · ${esc(it.f.field_1 || '')}</h2><button class="x" data-m="x">✕</button></div><div class="sbody">
+      <div class="sh">Čiju robu drži</div><div class="chipsel">${KO.map(k => `<button class="${st.k.has(k) ? 'on' : ''}" data-k="${esc(k)}">${esc(k)}</button>`).join('')}</div>
+      <input class="dinp" data-f="o" placeholder="ostali (upiši naziv)" value="${esc(st.o)}">
+      <div class="sh">Za koje grupe proizvoda</div><div class="chipsel">${ASORT.map(a => `<button class="${st.g.has(a) ? 'on' : ''}" data-g="${esc(a)}">${esc(a)}</button>`).join('')}</div>
+      <div class="sh">Cene u odnosu na nas</div><div class="seg">${['jeftiniji', 'slično', 'skuplji'].map(x => `<button class="${st.c === x ? 'on' : ''}" data-c="${x}">${x}</button>`).join('')}</div>
+      <div class="sh">Uslovi (rabat, valuta)</div><div class="seg">${['bolji', 'slično', 'lošiji'].map(x => `<button class="${st.u === x ? 'on' : ''}" data-u="${x}">${x}</button>`).join('')}</div>
+      <div class="sh">Napomena</div><input class="dinp" data-f="n" value="${esc(st.n)}"></div>
+      <div class="mbtn"><button class="btn" data-m="x">Odustani</button><button class="btn pri" data-m="ok">Sačuvaj</button></div></div>`;
+    paint();
+    const sync = () => m.querySelectorAll('[data-f]').forEach(i => st[i.dataset.f] = i.value);
+    m.addEventListener('click', e => {
+      e.stopPropagation(); const b = e.target.closest('button'); if (!b && e.target !== m) return;
+      if (b && b.dataset.k) { sync(); st.k.has(b.dataset.k) ? st.k.delete(b.dataset.k) : st.k.add(b.dataset.k); paint(); return; }
+      if (b && b.dataset.g) { sync(); st.g.has(b.dataset.g) ? st.g.delete(b.dataset.g) : st.g.add(b.dataset.g); paint(); return; }
+      if (b && b.dataset.c) { sync(); st.c = st.c === b.dataset.c ? '' : b.dataset.c; paint(); return; }
+      if (b && b.dataset.u) { sync(); st.u = st.u === b.dataset.u ? '' : b.dataset.u; paint(); return; }
+      if (b && b.dataset.m === 'ok') { sync(); const ks = [...st.k].concat(st.o.split(',').map(x => x.trim()).filter(Boolean).map(x => 'ostali: ' + x)); if (!ks.length) { m.querySelector('[data-f=o]').focus(); return; } modalDone(m, () => res({ ks, gs: [...st.g], c: st.c, u: st.u, n: st.n })); return; }
+      if (!b || b.dataset.m) { modalDone(m, () => res(null)); }
+    });
+    modalOpen(m, () => { m.remove(); res(null); });
+  });
+}
+async function addKonk(it) {
+  const r = await konkForm(it); if (!r) return;
+  xAdd('konk', { Title: String(it.f.Title), KupacSifra: String(it.f.Title), KupacNaziv: it.f.field_1 || '', Konkurenti: r.ks.join(', '), Grupe: r.gs.join(', '), Cene: r.c, Uslovi: r.u, Napomena: r.n, Korisnik: me(), Vreme: new Date().toISOString() });
+  await logEvent('KONKURENCIJA', null, it, { Napomena: r.ks.join(', ') + (r.gs.length ? ' · ' + r.gs.join(', ') : '') });
+  toast('Konkurencija je zabeležena.'); render();
+}
+
+/* ---------- potencijal 1–5 ---------- */
+async function setPot(it, v) {
+  const old = num(it.f.PotencijalOcena); if (old === v) return;
+  it.f.PotencijalOcena = v; saveItems();
+  await queue({ type: 'patch', itemId: it.id, fields: { PotencijalOcena: v } });
+  await logEvent('POTENCIJAL', null, it, { Napomena: (old ? old + ' → ' : '') + v });
+  render();
+}
+
+/* ---------- odsustva ---------- */
+async function newAbsence() {
+  const V = getSet('vrsteOdsustva');
+  const c = await askChoice('Prijavi odsustvo', V.map(v => [v, v, ''])); if (!c) return;
+  const od = await askDate('Od kog dana', ymd()); if (!od) return;
+  const doo = await askDate('Do kog dana (uključujući)', od); if (!doo) return;
+  xAdd('ods', { Title: c, Korisnik: me(), Od: od, Do: doo < od ? od : doo, Vrsta: c, Status: 'prijavljeno' });
+  toast('Odsustvo je prijavljeno.'); render();
+}
+
+/* ---------- desktop: nedeljni plan ---------- */
+function weekStart(s) { const x = new Date(s + 'T12:00:00'), w = (x.getDay() + 6) % 7; x.setDate(x.getDate() - w); return ymd(x); }
+function vNedelja() {
+  const ws = S.week || weekStart(ymd()), user = S.planUser || komUsers()[0] || me();
+  const days = [0, 1, 2, 3, 4, 5].map(i => addDays(ws, i));
+  const D = danasData(), pool = D ? D.rows.map(r => r.it).concat(D.ob) : [];
+  const col = s => { const P = planOfDay(s, user), hol = isHoliday(s), ab = absentOn(s, user); return `<div class="wcol ${s === ymd() ? 'today' : ''}" data-day="${s}"><div class="wh">${DOW[new Date(s + 'T12:00:00').getDay()]} ${new Date(s + 'T12:00:00').toLocaleDateString('sr-Latn-RS', { day: 'numeric', month: 'numeric' })}${hol ? ' · praznik' : ''}${ab ? ' · odsutan' : ''}<span class="s"> · ${P.length}</span></div>${P.map((p, i) => { const done = p.f.Status === 'obiđen' || visitedOn(p.f.Title, s, user); return `<div class="wit ${done ? 'done' : ''}" draggable="true" data-pid="${p.id}"><b>${i + 1}.</b> ${esc(p.f.KupacNaziv || p.f.Title)}${p.f.Napomena ? `<div class="s">📝 ${esc(p.f.Napomena)}</div>` : ''}<button class="wx" data-a="pmenu" data-v="${p.id}">⋯</button></div>`; }).join('')}<div class="wdrop">prevuci kupca ovde</div></div>`; };
+  return bar('Plan po nedeljama') + `<main class="main wide">
+    <div class="wtop"><button class="btn" data-a="wprev">‹</button><b>${new Date(ws + 'T12:00:00').toLocaleDateString('sr-RS')} – ${new Date(addDays(ws, 5) + 'T12:00:00').toLocaleDateString('sr-RS')}</b><button class="btn" data-a="wnext">›</button><button class="btn" data-a="wtoday">Ova nedelja</button>
+      ${komUsers().length > 1 ? `<select data-i="planuser">${komUsers().map(u => `<option value="${u}" ${u === user ? 'selected' : ''}>${esc(nameOf(u))}</option>`).join('')}</select>` : `<span class="s">Komercijalista: ${esc(nameOf(user))}</span>`}</div>
+    <div class="wgrid">
+      <div class="wside"><div class="fsel srch"><span class="ic">🔍</span><input type="search" data-i="dq" placeholder="Pretraži kupce" value="${esc(S.dq)}"></div>${MAINF.map(fBtn).join('')}
+        <div class="s" style="margin:6px 2px">${pool.length ? `Prevuci kupca u dan · ${pool.length}` : 'Izaberi pravac ili pretraži kupce.'}</div>
+        <div class="wpool">${pool.slice(0, 150).map(it => `<div class="wit" draggable="true" data-kid="${esc(it.id)}">${esc(it.f.field_1 || it.f.Title)}<div class="s">${esc(it.f.field_4 || '')} · ${klasaOf(it) || '–'}${(() => { const d = dueOf(it); return d ? d.never ? ' · nikad' : d.over > 0 ? ' · kasni ' + d.over + ' d' : '' : ''; })()}</div></div>`).join('')}</div></div>
+      <div class="wdays">${days.map(col).join('')}</div>
+      ${modOn('mapa') ? `<div class="wmap"><div class="s">Mapa dana: ${days.map(s => `<button class="lnk ${S.mapDay === s ? 'on' : ''}" data-a="mapday" data-v="${s}">${DOW[new Date(s + 'T12:00:00').getDay()].slice(0, 3)}</button>`).join(' ')}</div><div id="map" class="mapbox"></div></div>` : ''}
+    </div></main>` + tabs('nedelja');
+}
+function wireWeek() {
+  const user = S.planUser || komUsers()[0] || me();
+  document.querySelectorAll('.wit[draggable]').forEach(el => el.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', JSON.stringify({ pid: el.dataset.pid, kid: el.dataset.kid })); }));
+  document.querySelectorAll('.wcol').forEach(col => {
+    col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
+    col.addEventListener('dragleave', () => col.classList.remove('over'));
+    col.addEventListener('drop', e => {
+      e.preventDefault(); col.classList.remove('over');
+      let d; try { d = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (x) { return; }
+      const day = col.dataset.day, items = [...col.querySelectorAll('.wit')], before = items.find(x => e.clientY < x.getBoundingClientRect().top + x.offsetHeight / 2);
+      if (d.kid) { const it = S.items.find(x => String(x.id) === d.kid); if (it) addToPlan([it], day, user); }
+      else if (d.pid) {
+        const p = S.X.plan.find(x => x.id === d.pid); if (!p) return;
+        if (p.f.Datum !== day) { xSet('plan', p, { Datum: day, Redosled: 999, Izmenio: me() }); }
+      }
+      // redosled po mestu spuštanja
+      const P = planOfDay(day, user); const moved = d.pid ? P.find(x => x.id === d.pid) : P[P.length - 1];
+      if (moved && before) { const rest = P.filter(x => x !== moved), bi = rest.findIndex(x => x.id === before.dataset.pid); rest.splice(bi < 0 ? rest.length : bi, 0, moved); rest.forEach((x, n) => { if (num(x.f.Redosled) !== n + 1) xSet('plan', x, { Redosled: n + 1, Izmenio: me() }); }); }
+      else P.forEach((x, n) => { if (num(x.f.Redosled) !== n + 1) xSet('plan', x, { Redosled: n + 1, Izmenio: me() }); });
+      render();
+    });
+  });
+  if (document.getElementById('map')) showMap(S.mapDay || ymd(), user);
+}
+
+/* ---------- mapa ---------- */
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const c = document.createElement('link'); c.rel = 'stylesheet'; c.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(c);
+    const s = document.createElement('script'); s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'; s.onload = res; s.onerror = () => rej(new Error('Mapa nije dostupna (nema mreže).')); document.head.appendChild(s);
+  });
+}
+function routeUrl(pts) {
+  if (!pts.length) return '';
+  const f = p => p.lat + ',' + p.lon, last = pts[pts.length - 1], mid = pts.slice(0, -1).slice(0, 9);
+  return `https://www.google.com/maps/dir/?api=1&destination=${f(last)}${mid.length ? '&waypoints=' + encodeURIComponent(mid.map(f).join('|')) : ''}&travelmode=driving`;
+}
+async function showMap(s, user) {
+  const el = document.getElementById('map'); if (!el) return;
+  try { await loadLeaflet(); } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const P = planOfDay(s, user || me()), pts = [];
+  P.forEach((p, i) => { const it = itemBySifra(p.f.Title), l = it && parseLoc(it.f.Lokacija); if (l) pts.push({ ...l, n: i + 1, name: p.f.KupacNaziv, done: p.f.Status === 'obiđen' || visitedOn(p.f.Title, s, user) }); });
+  if (S.lmap) { S.lmap.remove(); S.lmap = null; }
+  const map = S.lmap = L.map(el).setView(pts.length ? [pts[0].lat, pts[0].lon] : [43.58, 21.33], pts.length ? 11 : 8);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+  pts.forEach(p => L.marker([p.lat, p.lon], { icon: L.divIcon({ className: 'mnum' + (p.done ? ' done' : ''), html: String(p.n), iconSize: [26, 26] }) }).addTo(map).bindPopup(esc(p.n + '. ' + p.name)));
+  if (pts.length > 1) { L.polyline(pts.map(p => [p.lat, p.lon]), { weight: 3, opacity: .7 }).addTo(map); map.fitBounds(pts.map(p => [p.lat, p.lon]), { padding: [30, 30] }); }
+  const miss = P.length - pts.length, info = document.getElementById('mapinfo');
+  if (info) info.innerHTML = `${pts.length ? `<a class="btn pri" href="${esc(routeUrl(pts.filter(p => !p.done)))}" target="_blank" rel="noopener">➤ Otvori rutu u Google mapama</a>` : ''}${miss ? `<p class="s">${miss} kupaca iz plana nema zabeleženu lokaciju i nisu na mapi.</p>` : ''}`;
+}
+function vMapa() {
+  return bar('Mapa · plan ' + dLabel(S.pday || ymd()), true) + `<main class="main"><div id="map" class="mapbox tall"></div><div id="mapinfo" style="margin-top:10px"></div></main>`;
+}
+// postavljanje lokacije kupca čiodom
+function vPin() {
+  const it = S.cur;
+  return bar('Lokacija na mapi', true) + `<main class="main"><p class="s">${esc(it.f.field_1 || '')} · ${esc([it.f.field_3, it.f.field_4].filter(Boolean).join(', '))}</p><p class="s">Pomeri čiodu na ulaz objekta. Lokacija sa mape važi dok je prva poseta ne potvrdi ili ispravi.</p><div id="map" class="mapbox tall"></div></main><div class="foot"><div class="in"><button class="btn pri" data-a="pinsave">Sačuvaj lokaciju</button></div></div>`;
+}
+async function wirePin() {
+  const el = document.getElementById('map'); if (!el) return;
+  try { await loadLeaflet(); } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const it = S.cur, l = parseLoc(it.f.Lokacija);
+  let c = l ? [l.lat, l.lon] : null;
+  if (!c) { const t = await townPos(it.f.field_4); c = t ? [t.lat, t.lon] : [43.58, 21.33]; }
+  if (S.lmap) { S.lmap.remove(); S.lmap = null; }
+  const map = S.lmap = L.map(el).setView(c, l ? 17 : 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+  S.pin = L.marker(c, { draggable: true }).addTo(map);
+  map.on('click', e => S.pin.setLatLng(e.latlng));
+}
+async function pinSave() {
+  const it = S.cur, ll = S.pin.getLatLng(), old = it.f.Lokacija;
+  if (!await askSure('Sačuvaj lokaciju', `<p>Lokacija objekta <b>${esc(it.f.field_1 || '')}</b> biće postavljena na mesto čiode.</p>`, 'Da, sačuvaj')) return;
+  it.f.Lokacija = `${ll.lat.toFixed(6)}, ${ll.lng.toFixed(6)} (±50 m) mapa`; saveItems();
+  await queue({ type: 'patch', itemId: it.id, fields: { Lokacija: it.f.Lokacija } });
+  await logEvent('LOKACIJA SA MAPE', { lat: ll.lat, lon: ll.lng, acc: 50 }, it, { Napomena: 'stara: ' + (old || '—') });
+  toast('Lokacija je sačuvana.'); history.back();
+}
+
+/* ---------- aktivnost (call centar, admin) ---------- */
+function vAktivnost() {
+  const ev = S.log.slice().reverse().filter(e => e.t !== 'POTENCIJAL').slice(0, 150);
+  const op = S.X.zad.filter(z => z.f.Status !== 'urađen' && z.f.Status !== 'otkazan' && ((z.f.Za || '').toLowerCase() === me() || z.f.Za === role()));
+  let lastD = '';
+  return bar('Aktivnost') + `<main class="main wide">
+    ${op.length ? `<div class="sech"><span>Zadaci za mene · ${op.length}</span></div>${op.map(z => taskHtml(z, true)).join('')}` : ''}
+    <div class="sech"><span>Šta se dešava na terenu</span><button class="lnk" data-a="newtask">＋ Zadatak za Petra</button></div>
+    ${ev.map(e => { const d = e.v ? ymd(e.v) : ''; const h = d !== lastD ? `<div class="dsep">${dLabel(d)}</div>` : ''; lastD = d; const it = e.s && itemBySifra(e.s); return h + `<div class="hrow" ${it ? `data-a="kupac" data-v="${esc(it.id)}"` : ''}><div class="t">${esc(e.t.toLowerCase())}${e.n ? ' · ' + esc(e.n) : ''}</div><div class="s">${hhmm(e.v)} · ${esc(nameOf(e.k))}${e.u ? ' · ' + e.u + ' m' : ''}</div>${e.m ? `<div class="s2">${esc(e.m)}</div>` : ''}</div>`; }).join('') || '<div class="empty">Još nema aktivnosti.</div>'}
+  </main>` + tabs('aktivnost');
+}
+
+/* ---------- nadzor (admin) ---------- */
+function vNadzor() {
+  const s = S.nzDay || ymd(), user = S.planUser || komUsers()[0] || '';
+  const ev = S.log.filter(e => e.v && ymd(e.v) === s && (e.k || '').toLowerCase() === user);
+  const st = ev.find(e => e.t === 'POČETAK DANA'), en = ev.filter(e => e.t === 'KRAJ DANA').pop();
+  const P = S.X.plan.filter(p => p.f.Datum === s && (p.f.Korisnik || '').toLowerCase() === user && p.f.Status !== 'izbačen');
+  const pd = P.filter(p => p.f.Status === 'obiđen' || visitedOn(p.f.Title, s, user)).length, pAll = P.filter(p => p.f.Status !== 'prebačen').length + P.filter(p => p.f.Status === 'prebačen').length;
+  const vis = ev.filter(e => e.t === 'POČETAK POSETE').length, nog = ev.filter(e => /BEZ GPS/.test(e.m || '')).length;
+  const zOpen = S.X.zad.filter(z => z.f.Status === 'otvoren' && ((z.f.Za || '').toLowerCase() === user || z.f.Za === 'kom'));
+  const zLate = zOpen.filter(z => z.f.Rok && z.f.Rok < ymd()), zP1 = zOpen.filter(z => num(z.f.Prioritet) === 1);
+  // 7 dana
+  const wk = [...Array(7)].map((_, i) => addDays(s, -6 + i)).map(d => { const pp = S.X.plan.filter(p => p.f.Datum === d && (p.f.Korisnik || '').toLowerCase() === user && p.f.Status !== 'izbačen'); const ok = pp.filter(p => p.f.Status === 'obiđen' || visitedOn(p.f.Title, d, user)).length; const vv = S.log.filter(e => e.v && ymd(e.v) === d && (e.k || '').toLowerCase() === user && e.t === 'POČETAK POSETE').length; return { d, pp: pp.length, ok, vv }; });
+  const ods = S.X.ods.filter(o => o.f.Status === 'prijavljeno');
+  return bar('Nadzor') + `<main class="main wide">
+    <div class="wtop"><button class="btn" data-a="nzprev">‹</button><b>${new Date(s + 'T12:00:00').toLocaleDateString('sr-Latn-RS', { weekday: 'long', day: 'numeric', month: 'numeric', year: 'numeric' })}</b><button class="btn" data-a="nznext">›</button><button class="btn" data-a="nztoday">Danas</button><span class="s">${esc(nameOf(user))}</span><button class="btn" data-a="nzmail">✉ Izveštaj</button></div>
+    ${ods.length ? `<div class="card warnc"><b>Prijavljena odsustva za odobrenje:</b>${ods.map(o => `<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><span class="grow">${esc(nameOf(o.f.Korisnik))} · ${esc(o.f.Vrsta)} · ${fmtDate(o.f.Od)}–${fmtDate(o.f.Do)}</span><button class="btn" data-a="odsok" data-v="${o.id}">Odobri</button><button class="btn" data-a="odsno" data-v="${o.id}">Odbij</button></div>`).join('')}</div>` : ''}
+    <div class="sum4"><div class="kpi"><span class="s">Radni dan</span><b>${st ? hhmm(st.v) : '—'}–${en ? hhmm(en.v) : (st ? '…' : '—')}</b></div><div class="kpi"><span class="s">Posete</span><b>${vis}</b></div><div class="kpi"><span class="s">Plan</span><b>${pd}/${pAll}</b></div><div class="kpi"><span class="s">Bez GPS-a</span><b>${nog}</b></div></div>
+    <div class="sum4"><div class="kpi"><span class="s">Otvoreni zadaci</span><b>${zOpen.length}</b></div><div class="kpi"><span class="s">Primarni</span><b>${zP1.length}</b></div><div class="kpi"><span class="s">Kasne</span><b class="${zLate.length ? 'late' : ''}">${zLate.length}</b></div><div class="kpi"><span class="s">Beleške</span><b>${ev.filter(e => e.t === 'BELEŠKA').length}</b></div></div>
+    ${st && !en && s < ymd() ? '<div class="card warnc">⚠ Dan nije završen.</div>' : ''}
+    <h2>Poslednjih 7 dana</h2><div class="card"><table class="tbl"><tr><th>Dan</th><th>Posete</th><th>Plan</th><th>Poštovanje plana</th></tr>${wk.map(w => `<tr><td>${dLabel(w.d)}</td><td>${w.vv}</td><td>${w.ok}/${w.pp}</td><td>${w.pp ? Math.round(w.ok / w.pp * 100) + '%' : '—'}</td></tr>`).join('')}</table></div>
+    <h2>Izveštaj dana</h2><div class="card rep">${reportHtml(s, user)}</div>
+  </main>` + tabs('nadzor');
+}
+
+/* ---------- admin ---------- */
+function vAdmin() {
+  const mods = getSet('moduli'), users = ['*', ...Object.keys(ROLES)], sab = getSet('sabloni');
+  const ta = (k, v, rows = 5) => `<textarea class="dinp" rows="${rows}" data-set="${k}">${esc(v)}</textarea>`;
+  const counts = {}; S.X.konk.forEach(k => String(k.f.Konkurenti || '').split(',').map(x => x.trim()).filter(x => x.startsWith('ostali:')).forEach(x => counts[x.slice(7).trim()] = (counts[x.slice(7).trim()] || 0) + 1));
+  return bar('Admin') + `<main class="main wide">
+    <h2>Moduli po korisniku</h2><p class="s">Kvačica = ekran je uključen. „Svi” važi za one koji nemaju svoje podešavanje.</p>
+    <div class="card" style="overflow:auto"><table class="tbl"><tr><th>Korisnik</th>${MODS.map(([, n]) => `<th>${n}</th>`).join('')}</tr>${users.map(u => `<tr><td>${u === '*' ? '<b>Svi</b>' : esc(nameOf(u)) + `<div class="s">${esc(ROLES[u] || '')}</div>`}</td>${MODS.map(([m]) => { const on = u === '*' ? !!(mods['*'] || {})[m] : modOn(m, u); return `<td><input type="checkbox" data-mod="${esc(u)}|${m}" ${on ? 'checked' : ''}></td>`; }).join('')}</tr>`).join('')}</table></div>
+    <h2>Šabloni poruka i zadataka</h2><p class="s">Jedan šablon po redu.</p>
+    <div class="agrid"><div><div class="sh">Call centar → Petar</div>${ta('sab.op2kom', sab.op2kom.join('\n'))}</div><div><div class="sh">Petar → call centar</div>${ta('sab.kom2op', sab.kom2op.join('\n'))}</div><div><div class="sh">Petar → magacin</div>${ta('sab.kom2mag', sab.kom2mag.join('\n'))}</div><div><div class="sh">Odgovori dodirom</div>${ta('sab.odgovori', sab.odgovori.join('\n'))}</div></div>
+    <div class="agrid"><div><div class="sh">Konkurenti</div>${ta('konkurenti', getSet('konkurenti').join('\n'))}${Object.keys(counts).length ? `<div class="s">Ručno upisani: ${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => esc(k) + ' (' + n + ')').join(', ')}</div>` : ''}</div><div><div class="sh">Razlozi za neobiđene</div>${ta('razlozi', getSet('razlozi').join('\n'))}</div><div><div class="sh">Praznici (GGGG-MM-DD)</div>${ta('praznici', getSet('praznici').join('\n'), 8)}</div><div><div class="sh">Vrste odsustva</div>${ta('vrsteOdsustva', getSet('vrsteOdsustva').join('\n'))}</div></div>
+    <div class="agrid"><div><div class="sh">Podsetnik za kraj dana (sat)</div><input class="dinp" data-set="podsetnik" value="${esc(getSet('podsetnik'))}"></div><div><div class="sh">Predlog plana: broj kupaca</div><input class="dinp" type="number" data-set="predlogBroj" value="${esc(getSet('predlogBroj'))}"></div><div><div class="sh">KPI ciljevi (za kasnije)</div>${ta('kpi', JSON.stringify(getSet('kpi'), null, 1), 4)}</div><div><div class="sh">Pragovi potencijala 1–5 (za kasnije)</div>${ta('pragoviPotencijala', JSON.stringify(getSet('pragoviPotencijala'), null, 1), 4)}</div></div>
+    <button class="btn pri" style="width:100%;margin-top:12px" data-a="adminsave">Sačuvaj podešavanja</button>
+  </main>` + tabs('admin');
+}
+function adminSave() {
+  const mods = getSet('moduli');
+  document.querySelectorAll('[data-mod]').forEach(c => { const [u, m] = c.dataset.mod.split('|'); mods[u] = mods[u] || {}; mods[u][m] = c.checked ? 1 : 0; });
+  putSet('moduli', mods);
+  const lines = k => document.querySelector(`[data-set="${k}"]`).value.split('\n').map(x => x.trim()).filter(Boolean);
+  const sab = { op2kom: lines('sab.op2kom'), kom2op: lines('sab.kom2op'), kom2mag: lines('sab.kom2mag'), odgovori: lines('sab.odgovori') };
+  putSet('sabloni', sab); putSet('konkurenti', lines('konkurenti')); putSet('razlozi', lines('razlozi')); putSet('praznici', lines('praznici')); putSet('vrsteOdsustva', lines('vrsteOdsustva'));
+  putSet('podsetnik', document.querySelector('[data-set="podsetnik"]').value.trim() || '17:30');
+  putSet('predlogBroj', num(document.querySelector('[data-set="predlogBroj"]').value) || 12);
+  try { putSet('kpi', JSON.parse(document.querySelector('[data-set="kpi"]').value)); putSet('pragoviPotencijala', JSON.parse(document.querySelector('[data-set="pragoviPotencijala"]').value)); } catch (e) { toast('KPI ili pragovi nisu ispravno napisani; ostalo je sačuvano.'); render(); return; }
+  toast('Podešavanja su sačuvana.'); render();
+}
+
+/* ---------- podsetnik i jučerašnji dan ---------- */
+function reminderDue() {
+  if (!isKom() || !dayOn()) return false;
+  const [h, m] = String(getSet('podsetnik') || '17:30').split(':').map(Number), n = new Date();
+  return n.getHours() * 60 + n.getMinutes() >= h * 60 + (m || 0);
+}
+const dayOpenOld = () => isKom() && S.day && S.day.date !== new Date().toLocaleDateString('sr-RS') && !S.day.end && S.day.start;
+function vJuce() {
+  const R = ['zaboravio sam', 'telefon se ugasio', 'nije bilo mreže', 'ostalo'];
+  return `<div class="login"><h1>Juče nije završen radni dan</h1><p class="s">Dan je počeo ${fmtDate(S.day.start)} u ${hhmm(S.day.start)}. Pre novog dana zatvori jučerašnji: izaberi razlog.</p>
+    <div class="opts">${R.map(r => `<button class="opt ${S.jr === r ? 'on' : ''}" data-a="jr" data-v="${esc(r)}">${esc(r)}</button>`).join('')}</div>
+    <button class="btn pri" style="margin-top:14px" data-a="juceok" ${S.jr ? '' : 'disabled'}>Zatvori jučerašnji dan</button></div>`;
+}
+async function closeYesterday() {
+  const old = ymd(S.day.start), when = new Date().toISOString();
+  await logEvent('KRAJ DANA', null, null, { Napomena: 'dan zatvoren naknadno (' + S.jr + '), počeo ' + fmtDate(S.day.start) });
+  // neobiđeni iz jučerašnjeg plana prelaze na danas
+  planOfDay(old).filter(p => p.f.Status !== 'obiđen' && !visitedOn(p.f.Title, old, me())).forEach(p => movePlan(p, ymd(), 'dan nije završen'));
+  S.day.end = when; S.jr = ''; saveDay(); render();
+}
+
+/* ---------- osvežavanje u pozadini (poruke, zadaci, plan) ---------- */
+async function pollX() {
+  if (DEMO || !navigator.onLine || document.hidden || !S.account) return;
+  const before = unreadCount();
+  try { await flush(); await fetchAllX(['por', 'zad', 'plan']); } catch (e) { return; }
+  const after = unreadCount();
+  if (after > before) toast(`📩 Nova poruka (${after})`);
+  if (!['audit', 'novi', 'beleska', 'krajposete', 'thread', 'admin', 'pin'].includes(S.view)) { const y = scrollY; render(); scrollTo(0, y); }
+  else paintBadge();
+}
+function paintBadge() { const b = document.querySelector('[data-v=poruke] .tb'); const n = unreadCount(); if (b) b.textContent = n || ''; }
+setInterval(pollX, 60000);
+
 async function refresh(manual) {
   if (DEMO) { if (manual) toast('Probni režim.'); return; }
   if (!navigator.onLine) { if (manual) toast('Nema mreže – radiš sa podacima iz telefona.'); return; }
@@ -1048,11 +1742,12 @@ async function refresh(manual) {
     const tmp = S.items.filter(x => String(x.id).startsWith('tmp'));
     S.items = fresh.concat(tmp);
     try { await fetchLog(); } catch (e) { console.warn('log', e); }
+    try { await fetchAllX(); } catch (e) { console.warn('x', e); }
     // ponovo primeni izmene koje još čekaju
     pend.filter(o => o.type === 'patch').forEach(o => { const it = S.items.find(x => x.id === o.itemId); if (it) Object.keys(o.fields).forEach(k => { if (!k.includes('@')) it.f[k] = o.fields[k]; }); });
     if (S.cur) S.cur = S.items.find(x => x.id === S.cur.id) || S.cur;
     saveItems();
-    if (!['audit', 'novi', 'beleska', 'krajposete'].includes(S.view)) render();
+    if (!['audit', 'novi', 'beleska', 'krajposete', 'thread', 'admin', 'pin'].includes(S.view)) render();
     if (manual) toast('Osveženo: ' + S.items.length + ' kupaca.');
   } catch (e) { console.warn(e); toast('Osvežavanje nije uspelo: ' + String(e.message || e).slice(0, 80)); }
 }
@@ -1071,9 +1766,10 @@ async function boot() {
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloaded || ['audit', 'novi', 'beleska', 'krajposete'].includes(S.view)) return; reloaded = true; location.reload(); });
     navigator.serviceWorker.register('sw.js').then(r => { const skip = () => r.waiting && r.waiting.postMessage('skip'); skip(); r.addEventListener('updatefound', () => { const n = r.installing; n && n.addEventListener('statechange', () => { if (n.state === 'installed') skip(); }); }); r.update().catch(() => {}); }).catch(() => {});
   }
-  if (DEMO) { S.items = demoItems(); S.view = 'danas'; resumeVisit() || render(); return; }
+  if (DEMO) { S.items = demoItems(); S.view = isKom() ? 'danas' : 'aktivnost'; resumeVisit() || render(); return; }
   try { await initAuth(); } catch (e) { $app.innerHTML = `<div class="login"><h1>Greška pri prijavi</h1><p class="s">${esc(e.message)}</p></div>`; return; }
   if (!S.account) { S.view = 'login'; render(); return; }
+  if (!isKom() && S.view === 'danas') { S.view = 'aktivnost'; history.replaceState({ v: 'aktivnost' }, ''); }
   const cached = loadCached();
   if (cached) { S.items = cached; resumeVisit() || render(); }
   await countPending();

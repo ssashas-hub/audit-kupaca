@@ -11,5 +11,23 @@ window.APP_CONFIG = {
   visitRadius: 50,    // metara: krug oko objekta (dodaje se trenutna GPS preciznost)
   maxAccuracy: 100,   // metara: lošija GPS preciznost se ne prihvata za početak posete
   allowNoGps: true,  // PROBA: kad GPS ne uspe, nudi „Nastavi bez GPS-a” (beleži se u Dnevnik rada). Za pravi rad staviti false.
-  mapAccuracy: 10     // metara: potrebna preciznost kada se objekat prvi put mapira (ispred ulaza)
+  mapAccuracy: 10,    // metara: potrebna preciznost kada se objekat prvi put mapira (ispred ulaza)
+  // uloge: admin (vidi i podešava sve), kom (komercijalista), op (call centar), mag (magacin)
+  roles: {
+    'aleksandarmilojevic@ekoline.rs': 'admin',
+    'powerapps@ekolineks.onmicrosoft.com': 'admin',
+    'petarjovanovic@ekoline.rs': 'kom',
+    'gordanamilojkovic@ekoline.rs': 'op',
+    'tamarajovanovic@ekoline.rs': 'op',
+    'magacin@ekoline.rs': 'mag'
+  },
+  names: {
+    'aleksandarmilojevic@ekoline.rs': 'Aleksandar',
+    'powerapps@ekolineks.onmicrosoft.com': 'Admin (server)',
+    'petarjovanovic@ekoline.rs': 'Petar',
+    'gordanamilojkovic@ekoline.rs': 'Goca',
+    'tamarajovanovic@ekoline.rs': 'Tamara',
+    'magacin@ekoline.rs': 'Magacin'
+  },
+  reportTo: 'aleksandarmilojevic@ekoline.rs'   // kome ide dnevni izveštaj na kraju dana
 };
