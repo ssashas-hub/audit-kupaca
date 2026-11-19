@@ -2185,6 +2185,23 @@ function resumeVisit() {
   const it = visitItem(); if (!it) return false;
   S.cur = it; go('kartica'); toast('Nastavljaš posetu: ' + S.visit.n); return true;
 }
+/* ---------- nulovanje: admin postavi znak u Podešavanjima, svaki uređaj jednom obriše svoje lokalne podatke ---------- */
+async function checkReset() {
+  if (DEMO || !navigator.onLine) return false;
+  try {
+    await resolveX(); if (!S.XL.pod) return false;
+    const j = await g('/sites/' + S.site + '/lists/' + S.XL.pod + '/items?$expand=fields($select=Title,Vrednost)&$top=200');
+    const it = j.value.find(x => x.fields.Title === 'nulovanje'), v = it && String(it.fields.Vrednost || '').replace(/"/g, '').trim();
+    if (!v || localStorage.getItem('ak_reset_seen') === v) return false;
+    const keep = ['ak_towns_v1', 'ak_chats_v1', 'ak_sytag_v1'];
+    Object.keys(localStorage).filter(k => k.startsWith('ak_') && !keep.includes(k)).forEach(k => localStorage.removeItem(k));
+    for (const o of (await DB.all()) || []) await DB.del(o.id);
+    localStorage.setItem('ak_reset_seen', v);
+    $app.innerHTML = '<div class="login"><h1>Aplikacija je vraćena na početak</h1><p class="s">Probni podaci su obrisani. Učitavam…</p></div>';
+    setTimeout(() => location.reload(), 800);
+    return true;
+  } catch (e) { console.warn('nulovanje', e); return false; }
+}
 async function boot() {
   history.replaceState({ v: 'danas' }, '');
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
@@ -2196,6 +2213,7 @@ async function boot() {
   if (DEMO) { S.items = demoItems(); S.view = isKom() ? 'danas' : 'aktivnost'; resumeVisit() || render(); return; }
   try { await initAuth(); } catch (e) { $app.innerHTML = `<div class="login"><h1>Greška pri prijavi</h1><p class="s">${esc(e.message)}</p></div>`; return; }
   if (!S.account) { S.view = 'login'; render(); return; }
+  if (await checkReset()) return;
   if (!isKom() && S.view === 'danas') { S.view = 'aktivnost'; history.replaceState({ v: 'aktivnost' }, ''); }
   await syncLoadCache();
   const cached = loadCached();
