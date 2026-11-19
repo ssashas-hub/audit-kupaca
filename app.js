@@ -413,7 +413,7 @@ function bar(title, back) {
 function saveDraft() { if (S.visit && S.d && S.view === 'audit' && S.cur && S.cur.id === S.visit.id) { S.visit.draft = { d: S.d, step: S.step }; saveDay(); } }
 function render() {
   saveDraft(); if (S.visit) visitItem();
-  let v = { poruke: vPoruke, thread: vThread, nedelja: vNedelja, mapa: vMapa, pin: vPin, aktivnost: vAktivnost, nadzor: vNadzor, admin: vAdmin, danas: vDanas, vise: vVise, beleska: vBeleska, tereni: vTereni, kupci: vKupci, kartica: vKartica, audit: vAudit, novi: vNovi, login: vLogin, kraj: vKraj, krajposete: vKrajPosete }[S.view] || vTereni;
+  let v = { tiketi: vTiketi, tiket: vTiket, poruke: vPoruke, thread: vThread, nedelja: vNedelja, mapa: vMapa, pin: vPin, aktivnost: vAktivnost, nadzor: vNadzor, admin: vAdmin, danas: vDanas, vise: vVise, beleska: vBeleska, tereni: vTereni, kupci: vKupci, kartica: vKartica, audit: vAudit, novi: vNovi, login: vLogin, kraj: vKraj, krajposete: vKrajPosete }[S.view] || vTereni;
   if (S.view !== 'login' && isKom()) { if (dayOpenOld() && !(S.visit && sameDay(S.visit.start))) v = vJuce; else if (!dayOn() && !(S.visit && sameDay(S.visit.start))) v = vDan; }
   $app.innerHTML = (DEMO ? '<div class="demo">Probni režim – izmišljeni kupci, ništa se ne šalje</div>' : '') + v();
   document.body.classList.toggle('tabs-on', !!document.querySelector('.tabs'));
@@ -587,10 +587,10 @@ async function visitEnd() {
   toast('Poseta je završena.'); history.back();
 }
 function tabs(on) {
-  const n = unreadCount(), P = modOn('por') ? [['poruke', '💬', 'Poruke', n]] : [];
+  const n = unreadCount(), P = modOn('por') ? [['poruke', '💬', 'Poruke', n]] : [], TK = modOn('tik') ? [['tiketi', '🎫', 'Tiketi', tikNew()]] : [];
   const T = isKom() ? [['danas', '☀', 'Danas'], ['tereni', '☰', 'Kupci'], ...P, ['vise', '⋯', 'Više']]
-    : isAdmin() ? [['aktivnost', '⚡', 'Aktivnost'], ['nadzor', '📊', 'Nadzor'], ['nedelja', '📅', 'Plan'], ...P, ['tereni', '☰', 'Kupci'], ['admin', '⚙', 'Admin'], ['vise', '⋯', 'Više']]
-    : [['aktivnost', '⚡', 'Aktivnost'], ['nedelja', '📅', 'Plan'], ...P, ['tereni', '☰', 'Kupci'], ['vise', '⋯', 'Više']];
+    : isAdmin() ? [['aktivnost', '⚡', 'Aktivnost'], ['nadzor', '📊', 'Nadzor'], ['nedelja', '📅', 'Plan'], ...P, ...TK, ['tereni', '☰', 'Kupci'], ['admin', '⚙', 'Admin'], ['vise', '⋯', 'Više']]
+    : [['aktivnost', '⚡', 'Aktivnost'], ['nedelja', '📅', 'Plan'], ...P, ...TK, ['tereni', '☰', 'Kupci'], ['vise', '⋯', 'Više']];
   return `<nav class="tabs">${T.map(([k, i, nm, c]) => `<button class="${on === k ? 'on' : ''}" data-a="tab" data-v="${k}"><span>${i}</span>${nm}${c !== undefined ? `<b class="tb">${c || ''}</b>` : ''}</button>`).join('')}</nav>`;
 }
 function dayStats() {
@@ -655,6 +655,7 @@ function vVise() {
     <div class="card"><dl class="kv"><dt>Prijavljen</dt><dd>${esc(userName() || '—')}</dd><dt>Kupaca u telefonu</dt><dd>${S.items.length}</dd><dt>Čeka na slanje</dt><dd>${S.pending}${S.pending && !navigator.onLine ? ' (nema mreže)' : ''}</dd><dt>Radni dan</dt><dd>${S.day ? 'od ' + hhmm(S.day.start) + (S.day.end ? ' do ' + hhmm(S.day.end) : '') : '—'}</dd></dl></div>
     <button class="btn" style="width:100%;margin-top:12px" data-a="refresh">⟳ Osveži podatke</button>
     ${isKom() ? '<button class="btn" style="width:100%;margin-top:10px" data-a="kraj">Kraj radnog dana</button>' : ''}
+    ${isKom() && modOn('tik') ? `<button class="btn" style="width:100%;margin-top:10px" data-a="mojitik">🎫 Moji tiketi za BizniSoft · ${S.X.tik.filter(t => (t.f.Autor || '').toLowerCase() === me() && t.f.Status !== 'resen').length} otvorenih</button>` : ''}
     ${modOn('ods') && isKom() ? `<button class="btn" style="width:100%;margin-top:10px" data-a="newods">🏖 Prijavi odsustvo</button>${S.X.ods.filter(o => (o.f.Korisnik || '').toLowerCase() === me() && o.f.Do >= ymd()).map(o => `<div class="s" style="margin:6px 2px">${esc(o.f.Vrsta)} ${fmtDate(o.f.Od)}–${fmtDate(o.f.Do)} · ${esc(o.f.Status)}</div>`).join('')}` : ''}
     <div class="s" style="margin:12px 2px">Uloga: ${esc(ROLE_N[role()] || role())}</div>
     <button class="btn" style="width:100%;margin-top:10px" data-a="logout">Odjava</button>
@@ -943,6 +944,7 @@ async function finishAudit() {
   if (S.visit && S.visit.id === S.cur.id) { S.visit.audit = true; S.visit.draft = null; }
   if (S.day) S.day.audits = (S.day.audits || 0) + 1; saveDay();
   S.d = null;
+  try { tikFromAudit(S.cur, d); } catch (e) { console.warn('tiket', e); }
   await logEvent('AUDIT', null, S.cur, { Napomena: d.AuditIshod });
   toast((navigator.onLine || DEMO ? 'Audit je sačuvan.' : 'Audit je sačuvan u telefonu, šalje se kad bude mreže.') + ' Poseta i dalje traje.');
   S.step = 0; history.back();
@@ -1012,6 +1014,13 @@ document.addEventListener('click', async e => {
     case 'newtask': await newTask(null); break;
     case 'tktoggle': S.tkOpen = !S.tkOpen; rerender(); break;
     case 'thread': openThread(v); break;
+    case 'tikf': S.tikF = v; rerender(); break;
+    case 'tiket': S.tikId = v; go('tiket'); break;
+    case 'mojitik': S.tikF = 'svi'; go('tiketi'); break;
+    case 'tikpre': await tikAct('pre'); break;
+    case 'tikvrati': await tikAct('vrati'); break;
+    case 'tikres': await tikAct('res'); break;
+    case 'tikaut': { const t = S.X.tik.find(x => x.id === S.tikId); if (t) { S.toWho = isKom() ? 'op' : 'kom'; openThread(t.f.KupacSifra || '', `Tiket „${t.f.Title}”: `); } break; }
     case 'towho': S.toWho = v; S.msgTxt = (document.querySelector('[data-i=msgtxt]') || {}).value || ''; rerender(); break;
     case 'sendtpl': { const inp = document.querySelector('[data-i=msgtxt]'); const cur = inp ? inp.value.trim() : ''; sendMsg(cur && /…$/.test(v) ? v.replace(/…$/, ' ') + cur : v); break; }
     case 'sendmsg': sendMsg((document.querySelector('[data-i=msgtxt]') || {}).value); break;
@@ -1232,10 +1241,11 @@ function pjBlock(it) {
   return `<button class="sec" data-a="pjtoggle">${S.pjOpen ? '▾' : '▸'} Poslovne jedinice · ${P.length}</button>${S.pjOpen ? P.map(rowKupac).join('') : ''}`;
 }
 /* ---------- liste ---------- */
-const XL = { plan: 'Plan poseta', zad: 'Zadaci', por: 'Poruke', ods: 'Odsustva', konk: 'Konkurencija', pod: 'Podešavanja' };
+const XL = { plan: 'Plan poseta', zad: 'Zadaci', por: 'Poruke', ods: 'Odsustva', konk: 'Konkurencija', pod: 'Podešavanja', tik: 'Tiketi' };
 const LS_X = 'ak_x_v1';
-S.X = { plan: [], zad: [], por: [], ods: [], konk: [], pod: [] }; S.XL = {};
+S.X = { plan: [], zad: [], por: [], ods: [], konk: [], pod: [], tik: [] }; S.XL = {};
 try { const x = JSON.parse(localStorage.getItem(LS_X) || 'null'); if (x) Object.assign(S.X, x); } catch (e) { }
+if (!S.X.tik) S.X.tik = [];
 const saveX = () => { try { localStorage.setItem(LS_X, JSON.stringify(S.X)); } catch (e) { } };
 async function resolveX() {
   if (Object.keys(S.XL).length) return;
@@ -1324,7 +1334,7 @@ async function notifyTeams(za, text) {
 }
 /* ---------- podešavanja (admin) ---------- */
 const DEF_SET = {
-  moduli: { '*': { fin: 1, plan: 1, zad: 1, por: 1, konk: 1, pot: 1, ods: 1, mapa: 1 } },
+  moduli: { '*': { fin: 1, plan: 1, zad: 1, por: 1, konk: 1, pot: 1, ods: 1, mapa: 1, tik: 1 } },
   podsetnik: '17:30',
   konkurenti: ['Špajz', 'Viva', 'Macrobiotic', 'NS COM', 'Mrvica'],
   praznici: ['2026-01-01', '2026-01-02', '2026-01-07', '2026-02-16', '2026-02-17', '2026-04-10', '2026-04-11', '2026-04-12', '2026-04-13', '2026-05-01', '2026-05-02', '2026-11-11', '2027-01-01', '2027-01-02', '2027-01-07', '2027-02-15', '2027-02-16', '2027-04-30', '2027-05-01', '2027-05-02', '2027-05-03', '2027-05-04', '2027-11-11'],
@@ -1350,7 +1360,7 @@ function putSet(k, v) {
   const it = S.X.pod.find(x => x.f.Title === k), val = JSON.stringify(v);
   if (it) xSet('pod', it, { Vrednost: val, Izmenio: me() }); else xAdd('pod', { Title: k, Vrednost: val, Izmenio: me() });
 }
-const MODS = [['fin', 'Finansije i dokumenta'], ['plan', 'Planiranje'], ['zad', 'Zadaci'], ['por', 'Poruke'], ['konk', 'Konkurencija'], ['pot', 'Potencijal 1–5'], ['ods', 'Odsustva'], ['mapa', 'Mapa i ruta']];
+const MODS = [['fin', 'Finansije i dokumenta'], ['plan', 'Planiranje'], ['zad', 'Zadaci'], ['por', 'Poruke'], ['konk', 'Konkurencija'], ['pot', 'Potencijal 1–5'], ['ods', 'Odsustva'], ['mapa', 'Mapa i ruta'], ['tik', 'Tiketi za BizniSoft']];
 function modOn(m, user) {
   const s = getSet('moduli'), u = (user || me()).toLowerCase();
   const v = s[u] && m in s[u] ? s[u][m] : s['*'] && m in s['*'] ? s['*'][m] : 1;
@@ -1623,6 +1633,105 @@ function msgToTask(id) {
   xSet('por', m, { ZadatakId: 1 }); toast('Poruka je postala tvoj zadatak.'); render();
 }
 
+/* ---------- tiketi za BizniSoft ---------- */
+const TIK_ST = { novo: ['Novo', 'warn'], preuzet: ['Preuzet', 'brand'], resen: ['Rešen', 'ok'] };
+const tikRows = t => { try { return JSON.parse(t.f.Izmene || '[]'); } catch (e) { return []; } };
+const tikNew = () => modOn('tik') ? S.X.tik.filter(t => t.f.Status === 'novo').length : 0;
+const daySet = s => new Set((Array.isArray(s) ? s : String(s || '').split(',')).map(x => norm(x)).filter(Boolean));
+const sameSet = (a, b) => a.size === b.size && [...a].every(x => b.has(x));
+const telN = s => String(s || '').replace(/\D/g, '').slice(-8);
+function tikDiff(f, d) {
+  const r = [], N = norm;
+  if (d.StatusNovi && !N(f.field_11).split(/\s+/).includes(N(d.StatusNovi))) r.push(['Status', f.field_11 || '', d.StatusNovi]);
+  if (d.AuditSegment && !(f.field_14 && (N(d.AuditSegment).includes(N(f.field_14)) || N(f.field_14).includes(N(d.AuditSegment))))) r.push(['Segment', f.field_14 || '', d.AuditSegment]);
+  if (d.AuditTeren && N(d.AuditTeren) !== N(f.field_9)) r.push(['Pravac', f.field_9 || '', d.AuditTeren]);
+  if (d.AuditRazvoz && d.AuditRazvoz.length && !sameSet(daySet(d.AuditRazvoz), daySet(f.field_15))) r.push(['Dani razvoza', f.field_15 || '', d.AuditRazvoz.join(', ')]);
+  if (d.AuditPozivanje && d.AuditPozivanje.length && !sameSet(daySet(d.AuditPozivanje), daySet(f.field_16))) r.push(['Dani poziva', f.field_16 || '', d.AuditPozivanje.join(', ')]);
+  if (d.NarucujeIme && N(d.NarucujeIme) !== N(f.field_7)) r.push(['Kontakt osoba', f.field_7 || '', d.NarucujeIme]);
+  if (d.NarucujeTel && telN(d.NarucujeTel) !== telN(f.field_5)) r.push(['Telefon', f.field_5 || '', d.NarucujeTel]);
+  return r;
+}
+function tikFromAudit(it, d) {
+  if (!modOn('tik')) return;
+  const f = it.f, k = String(f.Title), old = S.X.tik.filter(t => t.f.KupacSifra === k);
+  if (/^NOVO-/.test(k)) {
+    if (old.some(t => t.f.Vrsta === 'novi')) return;
+    const rows = [['Naziv', '', f.field_1], ['Adresa', '', f.field_3], ['Mesto', '', f.field_4], ['Telefon', '', d.NarucujeTel || f.field_5], ['Kontakt osoba', '', d.NarucujeIme || f.field_7], ['Segment', '', d.AuditSegment], ['Pravac', '', d.AuditTeren], ['Dani razvoza', '', (d.AuditRazvoz || []).join(', ')], ['Dani poziva', '', (d.AuditPozivanje || []).join(', ')], ['Način plaćanja', '', d.AuditNacinPlacanja], ['Lokacija', '', d.Lokacija || f.Lokacija]].filter(x => x[2]);
+    xAdd('tik', { Title: 'Nov kupac: ' + (f.field_1 || k), Vrsta: 'novi', KupacSifra: k, KupacNaziv: f.field_1 || '', Izmene: JSON.stringify(rows), Autor: me(), Vreme: new Date().toISOString(), Status: 'novo' });
+    return;
+  }
+  const done = new Set(old.flatMap(t => tikRows(t).map(x => x[0] + '|' + norm(x[2]))));
+  const rows = tikDiff(f, d).filter(x => !done.has(x[0] + '|' + norm(x[2])));
+  if (!rows.length) return;
+  xAdd('tik', { Title: 'Izmena: ' + rows.map(x => x[0]).join(', '), Vrsta: 'izmena', KupacSifra: k, KupacNaziv: f.field_1 || '', Izmene: JSON.stringify(rows), Autor: me(), Vreme: new Date().toISOString(), Status: 'novo' });
+}
+function tikCheck(t) {
+  if (t.f.Status !== 'resen' || !S.SY.kupci) return '';
+  if (t.f.Vrsta === 'novi') { const s = t.f.BSSifra; if (!s) return ''; const ok = S.SY.kupci.kupci.some(x => String(x.s) === String(Number(s))); return ok ? '<span class="badge ok">✓ vidi se u BS</span>' : '<span class="badge bad">⚠ nije vidljivo u BS</span>'; }
+  const it = itemBySifra(t.f.KupacSifra); if (!it) return '';
+  let b = null;
+  if (it.f.Centrala) { const p = (S.SY.kupci.pj || []).find(x => String(x.k) === String(it.f.Centrala) && String(x.s) === String(it.f.PJ)); if (p) b = { kon: p.kon, tel: p.tel }; } else b = bsKupac(it);
+  if (!b) return '';
+  const chk = tikRows(t).filter(x => x[0] === 'Kontakt osoba' || x[0] === 'Telefon');
+  if (!chk.length) return '';
+  const ok = chk.every(x => x[0] === 'Telefon' ? telN(b.tel) === telN(x[2]) : norm(b.kon) === norm(x[2]));
+  return ok ? '<span class="badge ok">✓ vidi se u BS</span>' : '<span class="badge bad">⚠ nije vidljivo u BS</span>';
+}
+function vTiketi() {
+  const fl = S.tikF || 'otvoreni', mine = isKom();
+  let L = S.X.tik.slice().sort((a, b) => String(b.f.Vreme || '').localeCompare(String(a.f.Vreme || '')));
+  if (mine) L = L.filter(t => (t.f.Autor || '').toLowerCase() === me());
+  const cnt = s => L.filter(t => s === 'otvoreni' ? t.f.Status !== 'resen' : t.f.Status === s).length;
+  const V = L.filter(t => fl === 'svi' ? true : fl === 'otvoreni' ? t.f.Status !== 'resen' : t.f.Status === fl);
+  return bar(mine ? 'Moji tiketi' : 'Tiketi za BizniSoft', mine) + `<main class="main">
+    <div class="seg">${[['otvoreni', 'Otvoreni'], ['novo', 'Novi'], ['preuzet', 'Preuzeti'], ['resen', 'Rešeni'], ['svi', 'Svi']].map(([k, n]) => `<button class="${fl === k ? 'on' : ''}" data-a="tikf" data-v="${k}">${n}${k !== 'svi' ? ' · ' + cnt(k) : ''}</button>`).join('')}</div>
+    ${V.map(t => { const s = TIK_ST[t.f.Status] || ['?', '']; return `<div class="row" data-a="tiket" data-v="${esc(t.id)}"><div class="grow"><div class="t ell">${esc(t.f.KupacNaziv || t.f.KupacSifra)}</div><div class="s ell">${esc(t.f.Title)}</div><div class="s">${esc(nameOf(t.f.Autor))} · ${dLabel(ymd(t.f.Vreme))} ${hhmm(t.f.Vreme)}${t.f.Preuzeo && t.f.Status === 'preuzet' ? ' · preuzeo ' + esc(nameOf(t.f.Preuzeo)) : ''}</div></div><div class="right"><span class="badge ${s[1]}">${s[0]}</span>${tikCheck(t)}</div></div>`; }).join('') || '<div class="empty">Nema tiketa u ovom prikazu.</div>'}
+  </main>` + (mine ? '' : tabs('tiketi'));
+}
+function vTiket() {
+  const t = S.X.tik.find(x => x.id === S.tikId); if (!t) return bar('Tiket', true) + '<main class="main"><div class="empty">Tiket nije pronađen.</div></main>';
+  const f = t.f, s = TIK_ST[f.Status] || ['?', ''], it = itemBySifra(f.KupacSifra), mine = (f.Preuzeo || '').toLowerCase() === me(), can = !isKom() || isAdmin();
+  const wait = (a, b) => { if (!a || !b) return ''; const m = Math.round((Date.parse(b) - Date.parse(a)) / 60000); return m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' d'; };
+  return bar(f.Vrsta === 'novi' ? 'Tiket · nov kupac' : 'Tiket · izmena', true) + `<main class="main">
+    <div class="t">${esc(f.KupacNaziv || f.KupacSifra)}</div><div class="s">šifra u aplikaciji: ${esc(f.KupacSifra)}${it && it.f.Centrala ? ` · poslovna jedinica ${esc(it.f.PJ)} centrale ${esc(it.f.Centrala)}` : ''}</div>
+    ${it ? `<button class="lnk" data-a="kupac" data-v="${esc(it.id)}">› Otvori karticu kupca</button>` : ''}
+    <div class="card"><table class="tbl"><tr><th>Polje</th><th>U BizniSoft-u</th><th>Treba da bude</th></tr>${tikRows(t).map(r => `<tr><td><b>${esc(r[0])}</b></td><td class="s">${esc(r[1] || '—')}</td><td>${esc(r[2] || '')}</td></tr>`).join('')}</table></div>
+    <div class="card"><dl class="kv"><dt>Status</dt><dd><span class="badge ${s[1]}">${s[0]}</span> ${tikCheck(t)}</dd>
+      <dt>Napravio</dt><dd>${esc(nameOf(f.Autor))} · ${fmtDate(f.Vreme)} ${hhmm(f.Vreme)}</dd>
+      ${f.Preuzeo ? `<dt>Preuzeo</dt><dd>${esc(nameOf(f.Preuzeo))} · ${fmtDate(f.Preuzeto)} ${hhmm(f.Preuzeto)} <span class="s">(čekao ${wait(f.Vreme, f.Preuzeto)})</span></dd>` : ''}
+      ${f.Resio ? `<dt>Rešio</dt><dd>${esc(nameOf(f.Resio))} · ${fmtDate(f.Reseno)} ${hhmm(f.Reseno)} <span class="s">(rešavanje ${wait(f.Preuzeto || f.Vreme, f.Reseno)})</span></dd>` : ''}
+      ${f.BSSifra ? `<dt>Šifra u BS</dt><dd>${esc(f.BSSifra)}</dd>` : ''}
+      ${f.Komentar ? `<dt>Komentar</dt><dd>${esc(f.Komentar)}</dd>` : ''}</dl></div>
+    <button class="btn" style="width:100%" data-a="tikaut">💬 Piši autoru (${esc(nameOf(f.Autor))})</button>
+  </main>${can && f.Status !== 'resen' ? `<div class="foot"><div class="in">${f.Status === 'novo' ? '<button class="btn pri" data-a="tikpre">Preuzmi</button>' : `${mine ? '<button class="btn" data-a="tikvrati">Vrati</button>' : `<span class="s grow">Preuzeo ${esc(nameOf(f.Preuzeo))}</span>`}<button class="btn pri" style="flex:2" data-a="tikres">Rešeno</button>`}</div></div>` : ''}`;
+}
+async function tikAct(a) {
+  const t = S.X.tik.find(x => x.id === S.tikId); if (!t) return;
+  const now = new Date().toISOString();
+  if (a === 'pre') { if (t.f.Status !== 'novo') return; xSet('tik', t, { Status: 'preuzet', Preuzeo: me(), Preuzeto: now }); toast('Tiket je tvoj.'); }
+  if (a === 'vrati') { if (!await askSure('Vrati tiket', '<p>Tiket se vraća u „Novo“ i neko drugi može da ga preuzme.</p>', 'Vrati')) return; xSet('tik', t, { Status: 'novo', Preuzeo: '', Preuzeto: null }); }
+  if (a === 'res') {
+    const fx = { Status: 'resen', Resio: me(), Reseno: now };
+    if (t.f.Status === 'novo') { fx.Preuzeo = me(); fx.Preuzeto = now; }
+    if (t.f.Vrsta === 'novi') {
+      const s = String(await askText('Šifra kupca u BizniSoft-u', 'npr. 3721', t.f.BSSifra || '') || '').trim();
+      if (!s) return;
+      if (!/^\d+$/.test(s)) { toast('Šifra treba da bude broj.'); return; }
+      fx.BSSifra = s;
+    }
+    const c = await askText('Komentar (nije obavezno)', 'npr. uneto, promenjen i drugi telefon', t.f.Komentar || '');
+    if (c === null) return;
+    if (String(c).trim()) fx.Komentar = String(c).trim();
+    if (fx.BSSifra) {
+      const s = fx.BSSifra, it = itemBySifra(t.f.KupacSifra), dup = S.items.find(x => String(x.f.Title) === s);
+      if (it && !dup) { it.f.Title = s; saveItems(); await queue({ type: 'patch', itemId: it.id, fields: { Title: s } }); fx.KupacSifra = s; }
+      else if (dup) toast('Kupac ' + s + ' već postoji u aplikaciji, pa NOVO zapis nije preimenovan.');
+    }
+    xSet('tik', t, fx); toast('Tiket je rešen.');
+  }
+  render();
+}
+
 /* ---------- konkurencija ---------- */
 function konkForm(it) {
   return new Promise(res => {
@@ -1870,7 +1979,7 @@ async function closeYesterday() {
 async function pollX() {
   if (DEMO || !navigator.onLine || document.hidden || !S.account) return;
   const before = unreadCount();
-  try { await flush(); await fetchAllX(['por', 'zad', 'plan']); } catch (e) { return; }
+  try { await flush(); await fetchAllX(['por', 'zad', 'plan', 'tik']); } catch (e) { return; }
   const after = unreadCount();
   if (after > before) toast(`📩 Nova poruka (${after})`);
   if (!['audit', 'novi', 'beleska', 'krajposete', 'thread', 'admin', 'pin'].includes(S.view)) { const y = scrollY; render(); scrollTo(0, y); }
