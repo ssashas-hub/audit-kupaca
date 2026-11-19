@@ -14,20 +14,21 @@ window.APP_CONFIG = {
   mapAccuracy: 10,    // metara: potrebna preciznost kada se objekat prvi put mapira (ispred ulaza)
   // uloge: admin (vidi i podešava sve), kom (komercijalista), op (call centar), mag (magacin)
   roles: {
-    'aleksandarmilojevic@ekoline.rs': 'admin',
+    'sasa@ekolineks.onmicrosoft.com': 'admin',
     'powerapps@ekolineks.onmicrosoft.com': 'admin',
     'petarjovanovic@ekoline.rs': 'kom',
-    'gordanamilojkovic@ekoline.rs': 'op',
-    'tamarajovanovic@ekoline.rs': 'op',
-    'magacin@ekoline.rs': 'mag'
+    'goca@ekolineks.onmicrosoft.com': 'op',
+    'tamara@ekolineks.onmicrosoft.com': 'op',
+    'magacin-mig@ekoline.rs': 'mag'
   },
   names: {
-    'aleksandarmilojevic@ekoline.rs': 'Aleksandar',
+    'sasa@ekolineks.onmicrosoft.com': 'Aleksandar',
     'powerapps@ekolineks.onmicrosoft.com': 'Admin (server)',
     'petarjovanovic@ekoline.rs': 'Petar',
-    'gordanamilojkovic@ekoline.rs': 'Goca',
-    'tamarajovanovic@ekoline.rs': 'Tamara',
-    'magacin@ekoline.rs': 'Magacin'
+    'goca@ekolineks.onmicrosoft.com': 'Goca',
+    'tamara@ekolineks.onmicrosoft.com': 'Tamara',
+    'magacin-mig@ekoline.rs': 'Magacin'
   },
+  defaultRole: 'op',   // nalog koji nije na spisku vidi aplikaciju kao call centar (ne kao komercijalista)
   reportTo: 'aleksandarmilojevic@ekoline.rs'   // kome ide dnevni izveštaj na kraju dana
 };

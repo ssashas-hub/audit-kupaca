@@ -1115,7 +1115,7 @@ function shrink(file) {
 /* ================= PLANIRANJE, ZADACI, PORUKE, KONKURENCIJA, ODSUSTVA, NADZOR, ADMIN ================= */
 const ROLES = Object.fromEntries(Object.entries(C.roles || {}).map(([k, v]) => [k.toLowerCase(), v]));
 const NAMES = Object.fromEntries(Object.entries(C.names || {}).map(([k, v]) => [k.toLowerCase(), v]));
-const role = () => DEMO ? (new URLSearchParams(location.search).get('role') || 'kom') : (ROLES[userName().toLowerCase()] || 'kom');
+const role = () => DEMO ? (new URLSearchParams(location.search).get('role') || 'kom') : (ROLES[userName().toLowerCase()] || C.defaultRole || 'op');
 const me = () => userName().toLowerCase();
 const isKom = () => role() === 'kom';
 const isAdmin = () => role() === 'admin';
@@ -1190,7 +1190,7 @@ const APP_URL = 'https://ssashas-hub.github.io/audit-kupaca/index.html';
 function recipientsOf(za) {
   za = String(za || '').toLowerCase();
   if (za.includes('@')) return [za];
-  return Object.keys(ROLES).filter(e => ROLES[e] === za && !/onmicrosoft\.com$/.test(e));
+  return Object.keys(ROLES).filter(e => ROLES[e] === za && e !== 'powerapps@ekolineks.onmicrosoft.com');
 }
 async function notifyTeams(za, text) {
   if (DEMO) return;
