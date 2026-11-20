@@ -1839,8 +1839,7 @@ function ordPreporuka(it) {
   const A = S.SY.artikli, d = ymd(), my = ordStats(it).mine, out = [], seen = new Set();
   const add = (s, why) => { s = String(s); if (!A.art[s] || my.has(s) || seen.has(s)) return; seen.add(s); out.push({ s, why }); };
   (getSet('izdvojeno') || []).forEach(x => add(typeof x === 'string' ? x : x.s, '⭐ izdvojeno' + (x.n ? ' · ' + esc(x.n) : '')));
-  (A.akc || []).filter(x => !x.k && !x.ka && x.c > 0 && x.od && dateOk(x, d)).forEach(x => { if (x.a) add(x.a, '🏷 letak ' + esc(x.n || '')); });
-  // slični kupci: isti segment (tip objekta), bez centrala sa jedinicama, svaka firma jednom
+  // slični kupci (posle izdvojenih): isti segment (tip objekta), bez centrala sa jedinicama, svaka firma jednom
   const segOf = x => norm(cv(x.f.AuditSegment) || x.f.field_14 || '');
   const sg = segOf(it), st = S.SY.stavke;
   if (sg && st) {
@@ -1849,6 +1848,8 @@ function ordPreporuka(it) {
     const n = keys.size;
     if (n >= 3) Object.entries(cnt).filter(([, c]) => c >= 2 && c / n >= 0.25).sort((a, b) => b[1] - a[1]).slice(0, 40).forEach(([s, c]) => add(s, `👥 kupuje ${c} od ${n} sličnih`));
   }
+  // letak na kraju (inače ga ima ~80 artikala i prekrije ostalo)
+  (A.akc || []).filter(x => !x.k && !x.ka && x.c > 0 && x.od && dateOk(x, d)).forEach(x => { if (x.a) add(x.a, '🏷 letak ' + esc(x.n || '')); });
   return out;
 }
 function ordStep(a) { return a && a.kp > 0 ? a.kp : 1; }
