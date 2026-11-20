@@ -584,25 +584,42 @@ function vKrajPosete() {
     <div class="t" style="margin:16px 2px 8px">Ishod posete</div>
     <div class="opts">${VISH.map(x => `<button class="opt ${k.i === x ? 'on' : ''}" data-a="vish" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>
     <div class="fld" style="margin-top:14px"><label>Beleška o poseti</label><textarea id="vkb" placeholder="Šta je dogovoreno, šta treba uraditi…">${esc(k.b)}</textarea></div>
+    ${modOn('tik') ? `<div class="fld"><label>Promena podataka za BizniSoft (nije obavezno)</label><textarea id="vkt" rows="2" placeholder="npr. promenio PIB, novi kontakt, nova adresa… – ide operateru kao tiket">${esc(k.t || '')}</textarea></div>` : ''}
     <div class="err" id="err"></div>
   </main><div class="foot"><div class="in"><button class="btn pri" data-a="endvisitsave" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Tražim lokaciju…' : 'Završi posetu'}</button></div></div>`;
 }
 async function visitEnd() {
-  const k = S.vk || {}; k.b = (document.getElementById('vkb') || {}).value || k.b || '';
+  const k = S.vk || {}; k.b = (document.getElementById('vkb') || {}).value || k.b || ''; k.t = (document.getElementById('vkt') || {}).value || k.t || '';
   if (!k.i) { document.getElementById('err').textContent = 'Izaberi ishod posete.'; return; }
   const it = visitItem();
   S.busy = true; render();
   let p = null; try { p = await getPos(); } catch (e) { }
+  // daleko od objekta: poseta je verovatno završena ranije – pitaj za stvarno vreme
+  let endAt = null; const hm = it && parseLoc(it.f.Lokacija);
+  if (p && hm && dist(p, hm) > Math.max(300, 3 * (C.visitRadius || 50))) {
+    S.busy = false; render();
+    const ch = await askChoice(`Daleko si od objekta (${dist(p, hm) >= 1000 ? (dist(p, hm) / 1000).toFixed(1) + ' km' : Math.round(dist(p, hm)) + ' m'}).`, [['sada', 'Poseta se završava sada', 'Kraj posete je ovo vreme'], ['ranije', 'Završena je ranije', 'Upiši stvarno vreme završetka']]);
+    if (!ch) return;
+    if (ch === 'ranije') {
+      const t = String(await askText('Kada je poseta završena? (sat:minut)', 'npr. 11:12', '') || '').trim();
+      const m = t.match(/^(\d{1,2})[:.](\d{2})$/);
+      if (m) { const dt = new Date(); dt.setHours(+m[1], +m[2], 0, 0); if (dt > Date.parse(S.visit.start) && dt < Date.now()) endAt = dt.toISOString(); }
+      if (!endAt) { toast('Vreme nije ispravno – uzima se sadašnje.'); }
+    }
+    S.busy = true; render();
+  }
   const home = it && parseLoc(it.f.Lokacija), extra = { Napomena: k.i + (k.b.trim() ? ': ' + k.b.trim() : '') + (S.visit.audit ? '' : S.visit.draft ? ' (audit započet, nije završen)' : ' (bez audita)') + (p ? '' : ' [lokacija nije dostupna]') };
   if (p && home) extra.Udaljenost = dist(p, home);
+  if (endAt) extra.Napomena += ` [stvarni kraj posete ${hhmm(endAt)}]`;
   await logEvent('KRAJ POSETE', p, it, extra);
+  if (k.t.trim() && it && modOn('tik')) tikAdd({ Title: 'Izmena: promena podataka (sa terena)', Vrsta: 'izmena', KupacSifra: String(it.f.Title), KupacNaziv: it.f.field_1 || '', Izmene: JSON.stringify([['Napomena komercijaliste', '', k.t.trim()]]), Autor: me(), Vreme: new Date().toISOString(), Status: 'novo' });
   if (k.b.trim() && it) {
     const note = `[${new Date().toLocaleString('sr-RS')} · poseta: ${k.i}] ${k.b.trim()}`;
     it.f.Beleske = it.f.Beleske ? note + '\n' + it.f.Beleske : note; saveItems();
     await queue({ type: 'patch', itemId: it.id, fields: { Beleske: it.f.Beleske } });
   }
   if (it && it.f.Obici) { it.f.Obici = false; saveItems(); await queue({ type: 'patch', itemId: it.id, fields: { Obici: false } }); }
-  const v = (S.day.visits || []).slice().reverse().find(x => x.id === S.visit.id && !x.e); if (v) { v.e = new Date().toISOString(); v.i = k.i; }
+  const v = (S.day.visits || []).slice().reverse().find(x => x.id === S.visit.id && !x.e); if (v) { v.e = endAt || new Date().toISOString(); v.i = k.i; }
   S.visit = null; S.vk = null; S.busy = false; saveDay();
   toast('Poseta je završena.'); history.back();
 }
@@ -679,7 +696,7 @@ function vVise() {
     ${modOn('ods') && isKom() ? `<button class="btn" style="width:100%;margin-top:10px" data-a="newods">🏖 Prijavi odsustvo</button>${S.X.ods.filter(o => (o.f.Korisnik || '').toLowerCase() === me() && o.f.Do >= ymd()).map(o => `<div class="s" style="margin:6px 2px">${esc(o.f.Vrsta)} ${fmtDate(o.f.Od)}–${fmtDate(o.f.Do)} · ${esc(o.f.Status)}</div>`).join('')}` : ''}
     <div class="s" style="margin:12px 2px">Uloga: ${esc(ROLE_N[role()] || role())}</div>
     <button class="btn" style="width:100%;margin-top:10px" data-a="logout">Odjava</button>
-    <p class="s" style="text-align:center;margin-top:18px">Audit kupaca · verzija 20.11.2026</p>
+    <p class="s" style="text-align:center;margin-top:18px">Audit kupaca · verzija 20.11.2026 · 2</p>
   </main>` + tabs('vise');
 }
 function vBeleska() {
@@ -1007,6 +1024,7 @@ async function saveNovi(skipGps) {
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-a]'); if (!el) return;
   const a = el.dataset.a, v = el.dataset.v, d = S.d;
+  if (['sendmsg', 'osend', 'notesave', 'dayend', 'endvisitsave', 'newtask', 'tasksave', 'pinsave', 'novisave', 'krajsave', 'msgtask'].includes(a)) { if (S.lockA && Date.now() - S.lockA < 2000) return; S.lockA = Date.now(); }
   const rerender = () => { const y = scrollY; render(); scrollTo(0, y); };
   switch (a) {
     case 'back': history.back(); break;
@@ -1492,8 +1510,8 @@ function planMove(id, dir) {
   render();
 }
 function markPlanVisited(it) {
-  const p = planOfDay(ymd()).find(x => x.f.Title === String(it.f.Title));
-  if (p && p.f.Status !== 'obiđen') xSet('plan', p, { Status: 'obiđen' });
+  const t = [String(it.f.Title)]; if (it.f.Centrala) { const c = centralaOf(it); if (c) t.push(String(c.f.Title)); }
+  planOfDay(ymd()).filter(x => t.includes(x.f.Title) && x.f.Status !== 'obiđen').forEach(p => xSet('plan', p, { Status: 'obiđen' }));
 }
 async function predlogPlana() {
   const s = S.pday || ymd(), D = danasData();
@@ -1508,7 +1526,13 @@ async function predlogPlana() {
 }
 
 /* ---------- kraj dana: neobiđeni iz plana ---------- */
-function unvisitedPlan(s) { return planOfDay(s).filter(p => p.f.Status !== 'obiđen' && !visitedOn(p.f.Title, s, me())); }
+function unvisitedPlan(s) {
+  return planOfDay(s).filter(p => {
+    if (p.f.Status === 'obiđen' || visitedOn(p.f.Title, s, me())) return false;
+    const it = itemBySifra(p.f.Title); // centrala: dovoljno je da je obiđena bilo koja njena jedinica
+    return !(it && isHub(it) && pjOf(it).some(j => visitedOn(j.f.Title, s, me())));
+  });
+}
 S.kd = {}; // id plana -> {r: razlog, a: 'next'|'date'|'del', d: datum, t: tekst}
 function krajPlanHtml() {
   if (!modOn('plan')) return '';
@@ -1687,25 +1711,39 @@ function tikDiff(f, d) {
   if (d.AuditPozivanje && d.AuditPozivanje.length && !sameSet(daySet(d.AuditPozivanje), daySet(f.field_16))) r.push(['Dani poziva', f.field_16 || '', d.AuditPozivanje.join(', ')]);
   if (d.NarucujeIme && N(d.NarucujeIme) !== N(f.field_7)) r.push(['Kontakt osoba', f.field_7 || '', d.NarucujeIme]);
   if (d.NarucujeTel && telN(d.NarucujeTel) !== telN(f.field_5)) r.push(['Telefon', f.field_5 || '', d.NarucujeTel]);
-  if (!d0) return r;
+  if (!d0) return f.Centrala ? r.filter(x => ['Kontakt osoba', 'Telefon'].includes(x[0]) || (x[0] === 'Status' && /zatvoren/i.test(String(x[2])))) : r;
   const K = { 'Status': 'StatusNovi', 'Segment': 'AuditSegment', 'Pravac': 'AuditTeren', 'Dani razvoza': 'AuditRazvoz', 'Dani poziva': 'AuditPozivanje', 'Kontakt osoba': 'NarucujeIme', 'Telefon': 'NarucujeTel' };
   const same = (a, b) => JSON.stringify(Array.isArray(a) ? a.slice().sort() : a || '') === JSON.stringify(Array.isArray(b) ? b.slice().sort() : b || '');
   // BizniSoft nema vrednost, a Petar je nije menjao (aplikacija ju je sama predložila): nije izmena za BizniSoft
-  return r.filter(x => String(x[1] || '').trim() || !same(d[K[x[0]]], d0[K[x[0]]]));
+  const out = r.filter(x => String(x[1] || '').trim() || !same(d[K[x[0]]], d0[K[x[0]]]));
+  // poslovna jedinica: atributi (status, segment, pravac, dani) se u BizniSoft-u ne vode po jedinici – ostaju samo u aplikaciji; izuzetak: objekat zatvoren
+  return f.Centrala ? out.filter(x => ['Kontakt osoba', 'Telefon'].includes(x[0]) || (x[0] === 'Status' && /zatvoren/i.test(String(x[2])))) : out;
 }
+function opPrimary() {
+  const ops = recipientsOf('op'), d = ymd(); if (!ops.length) return null;
+  const order = ops.slice().sort((a, b) => (/goca|gordana/i.test(b) ? 1 : 0) - (/goca|gordana/i.test(a) ? 1 : 0));
+  return order.find(e => !absentOn(d, e)) || order[0];
+}
+function tikNotify(fields) {
+  if (!modOn('tik') || fields.Vrsta === 'provera') return;
+  const who = opPrimary(); if (!who || who === me()) return;
+  const what = fields.Vrsta === 'narudzba' ? '🛒 Nova narudžbina' : fields.Vrsta === 'novi' ? '🆕 Nov kupac za BizniSoft' : '🎫 Izmena podataka za BizniSoft';
+  notifyTeams(who, `${what} · ${fields.KupacNaziv || fields.KupacSifra} · ${fields.Title}. Otvori Tiketi u aplikaciji i preuzmi.`).catch(e => console.warn('tik notify', e));
+}
+function tikAdd(fields) { xAdd('tik', fields); tikNotify(fields); }
 function tikFromAudit(it, d) {
   if (!modOn('tik')) return;
   const f = it.f, k = String(f.Title), old = S.X.tik.filter(t => t.f.KupacSifra === k);
   if (/^NOVO-/.test(k)) {
     if (old.some(t => t.f.Vrsta === 'novi')) return;
     const rows = [['Naziv', '', f.field_1], ['Adresa', '', f.field_3], ['Mesto', '', f.field_4], ['Telefon', '', d.NarucujeTel || f.field_5], ['Kontakt osoba', '', d.NarucujeIme || f.field_7], ['Segment', '', d.AuditSegment], ['Pravac', '', d.AuditTeren], ['Dani razvoza', '', (d.AuditRazvoz || []).join(', ')], ['Dani poziva', '', (d.AuditPozivanje || []).join(', ')], ['Način plaćanja', '', d.AuditNacinPlacanja], ['Lokacija', '', d.Lokacija || f.Lokacija]].filter(x => x[2]);
-    xAdd('tik', { Title: 'Nov kupac: ' + (f.field_1 || k), Vrsta: 'novi', KupacSifra: k, KupacNaziv: f.field_1 || '', Izmene: JSON.stringify(rows), Autor: me(), Vreme: new Date().toISOString(), Status: 'novo' });
+    tikAdd({ Title: 'Nov kupac: ' + (f.field_1 || k), Vrsta: 'novi', KupacSifra: k, KupacNaziv: f.field_1 || '', Izmene: JSON.stringify(rows), Autor: me(), Vreme: new Date().toISOString(), Status: 'novo' });
     return;
   }
   const done = new Set(old.flatMap(t => tikRows(t).map(x => x[0] + '|' + norm(x[2]))));
   const rows = tikDiff(f, d).filter(x => !done.has(x[0] + '|' + norm(x[2])));
   if (!rows.length) return;
-  xAdd('tik', { Title: 'Izmena: ' + rows.map(x => x[0]).join(', '), Vrsta: 'izmena', KupacSifra: k, KupacNaziv: f.field_1 || '', Izmene: JSON.stringify(rows), Autor: me(), Vreme: new Date().toISOString(), Status: 'novo' });
+  tikAdd({ Title: 'Izmena: ' + rows.map(x => x[0]).join(', '), Vrsta: 'izmena', KupacSifra: k, KupacNaziv: f.field_1 || '', Izmene: JSON.stringify(rows), Autor: me(), Vreme: new Date().toISOString(), Status: 'novo' });
 }
 function tikCheck(t) {
   if (t.f.Vrsta === 'narudzba') return t.f.Status === 'resen' ? ordCheck(t) : '';
@@ -1935,7 +1973,7 @@ async function ordSend() {
   if (!await askSure('Pošalji narudžbinu', `<p><b>${esc(it.f.field_1 || it.f.Title)}</b><br>${o.tip === 'PF' ? 'plaća odmah (PF)' : 'na valutu (OA)'} · ${L.length} artikala · <b>${din(sum)} din</b> bez PDV</p>${w.length ? `<p class="late">${w.join('<br>')}</p>` : ''}${low.length ? `<p class="late">Nema dovoljno na stanju: ${low.map(x => esc(x[1])).join(', ')}</p>` : ''}<p>Narudžbina ide operateru kao tiket i unosi se u BizniSoft.</p>`, 'Pošalji')) return;
   const nap = await askText('Napomena uz narudžbinu (nije obavezno)', 'npr. isporuka u petak, pozvati pre dostave', '');
   if (nap === null) return;
-  xAdd('tik', { Title: `Narudžbina · ${L.length} art · ${din(sum)} din`, Vrsta: 'narudzba', KupacSifra: String(it.f.Title), KupacNaziv: it.f.field_1 || '', Izmene: JSON.stringify({ tip: o.tip, kupac: k.k, pj: k.pj, l: L, iznos: Math.round(sum * 100) / 100, nap: String(nap || '').trim() }), Autor: me(), Vreme: new Date().toISOString(), Status: 'novo' });
+  tikAdd({ Title: `Narudžbina · ${L.length} art · ${din(sum)} din`, Vrsta: 'narudzba', KupacSifra: String(it.f.Title), KupacNaziv: it.f.field_1 || '', Izmene: JSON.stringify({ tip: o.tip, kupac: k.k, pj: k.pj, l: L, iznos: Math.round(sum * 100) / 100, nap: String(nap || '').trim() }), Autor: me(), Vreme: new Date().toISOString(), Status: 'novo' });
   await logEvent('NARUDŽBINA', null, it, { Napomena: `${o.tip} · ${L.length} art · ${din(sum)} din${nap ? ' · ' + String(nap).trim() : ''}` });
   S.ord.q = {}; S.ord.tip = ''; ordSave(); S.ord = null;
   toast('Narudžbina je poslata.'); history.back();
